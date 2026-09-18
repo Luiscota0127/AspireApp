@@ -1,6 +1,8 @@
 @page "/projects/{ProjectId:guid}/members"
 @inject AspireApp.Web.Services.ApiAuthService Api
 @inject NavigationManager Nav
+@inject AspireApp.Web.Services.CollaborationService Collab
+@implements IAsyncDisposable
 
 <h3>Project Members</h3>
 
@@ -34,6 +36,9 @@ else
     protected override async Task OnInitializedAsync()
     {
         members = await Api.GetProjectMembersAsync(ProjectId);
+        // subscribe to project-specific SignalR group and listen for member changes
+        await Collab.SubscribeProjectAsync(ProjectId);
+        Collab.OnProjectMemberAdded += OnProjectMemberAdded;
     }
 
     private async Task Add()
@@ -49,4 +54,24 @@ else
     }
 
     private class NewMemberModel { public string Email { get; set; } = string.Empty; public string? Role { get; set; } }
+
+    private async Task OnProjectMemberAdded(Guid projectId, string? userId, string? role)
+    {
+        if (projectId != ProjectId) return;
+        members = await Api.GetProjectMembersAsync(ProjectId);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            Collab.OnProjectMemberAdded -= OnProjectMemberAdded;
+            await Collab.UnsubscribeProjectAsync(ProjectId);
+        }
+        catch
+        {
+            // ignore disposal errors
+        }
+    }
 }
