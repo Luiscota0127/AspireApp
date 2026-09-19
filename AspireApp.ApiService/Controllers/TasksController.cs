@@ -46,7 +46,9 @@ public class TasksController : ControllerBase
         var task = new TaskItem { Title = dto.Title, Description = dto.Description, ProjectId = dto.ProjectId, AssignedToId = dto.AssignedToId };
         _db.Tasks.Add(task);
         await _db.SaveChangesAsync();
-        await _hub.Clients.All.SendCoreAsync("TaskCreated", new object[] { new AspireApp.ApiService.Dto.TaskCollabDto(task.Id, task.Title, task.Description, (int)task.Status, task.ProjectId, task.AssignedToId) });
+        var dto = new AspireApp.ApiService.Dto.TaskCollabDto(task.Id, task.Title, task.Description, (int)task.Status, task.ProjectId, task.AssignedToId);
+        await _hub.Clients.All.SendCoreAsync("TaskCreated", new object[] { dto });
+        await _hub.Clients.Group($"project-{task.ProjectId}").SendCoreAsync("TaskCreated", new object[] { dto });
         return CreatedAtAction(nameof(Get), new { id = task.Id }, task);
     }
 
@@ -69,7 +71,9 @@ public class TasksController : ControllerBase
         task.DueDate = dto.DueDate;
         task.AssignedToId = dto.AssignedToId;
         await _db.SaveChangesAsync();
-        await _hub.Clients.All.SendCoreAsync("TaskUpdated", new object[] { new AspireApp.ApiService.Dto.TaskCollabDto(task.Id, task.Title, task.Description, (int)task.Status, task.ProjectId, task.AssignedToId) });
+        var dto = new AspireApp.ApiService.Dto.TaskCollabDto(task.Id, task.Title, task.Description, (int)task.Status, task.ProjectId, task.AssignedToId);
+        await _hub.Clients.All.SendCoreAsync("TaskUpdated", new object[] { dto });
+        await _hub.Clients.Group($"project-{task.ProjectId}").SendCoreAsync("TaskUpdated", new object[] { dto });
         return NoContent();
     }
 
@@ -88,6 +92,7 @@ public class TasksController : ControllerBase
         _db.Tasks.Remove(task);
         await _db.SaveChangesAsync();
         await _hub.Clients.All.SendCoreAsync("TaskDeleted", new object[] { id });
+        await _hub.Clients.Group($"project-{task.ProjectId}").SendCoreAsync("TaskDeleted", new object[] { id });
         return NoContent();
     }
 }
