@@ -24,14 +24,24 @@ public class TasksController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> Get()
     {
-        var tasks = await _db.Tasks.ToListAsync();
+        // project the entities into DTOs so EF navigation properties are never serialized
+        var tasks = await _db.Tasks
+            .AsNoTracking()
+            .Select(t => new AspireApp.ApiService.Dto.TaskCollabDto(
+                t.Id, t.Title, t.Description, (int)t.Status, t.ProjectId, t.AssignedToId))
+            .ToListAsync();
         return Ok(tasks);
     }
 
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> Get(Guid id)
     {
-        var task = await _db.Tasks.FindAsync(id);
+        var task = await _db.Tasks
+            .AsNoTracking()
+            .Where(t => t.Id == id)
+            .Select(t => new AspireApp.ApiService.Dto.TaskCollabDto(
+                t.Id, t.Title, t.Description, (int)t.Status, t.ProjectId, t.AssignedToId))
+            .FirstOrDefaultAsync();
         if (task == null) return NotFound();
         return Ok(task);
     }
@@ -46,10 +56,12 @@ public class TasksController : ControllerBase
         var task = new TaskItem { Title = dto.Title, Description = dto.Description, ProjectId = dto.ProjectId, AssignedToId = dto.AssignedToId };
         _db.Tasks.Add(task);
         await _db.SaveChangesAsync();
-        var dto = new AspireApp.ApiService.Dto.TaskCollabDto(task.Id, task.Title, task.Description, (int)task.Status, task.ProjectId, task.AssignedToId);
-        await _hub.Clients.All.SendCoreAsync("TaskCreated", new object[] { dto });
-        await _hub.Clients.Group($"project-{task.ProjectId}").SendCoreAsync("TaskCreated", new object[] { dto });
-        return CreatedAtAction(nameof(Get), new { id = task.Id }, task);
+        var collabDto = new AspireApp.ApiService.Dto.TaskCollabDto(task.Id, task.Title, task.Description, (int)task.Status, task.ProjectId, task.AssignedToId);
+        await _hub.Clients.All.SendCoreAsync("TaskCreated", new object[] { collabDto });
+        await _hub.Clients.Group($"project-{task.ProjectId}").SendCoreAsync("TaskCreated", new object[] { collabDto });
+        // return the DTO, not the EF entity: task.Project is tracked, and serializing
+        // the entity would walk Project.Tasks -> Task.Project -> ... until the JSON depth limit.
+        return CreatedAtAction(nameof(Get), new { id = task.Id }, collabDto);
     }
 
     [HttpPut("{id:guid}")]
@@ -71,9 +83,9 @@ public class TasksController : ControllerBase
         task.DueDate = dto.DueDate;
         task.AssignedToId = dto.AssignedToId;
         await _db.SaveChangesAsync();
-        var dto = new AspireApp.ApiService.Dto.TaskCollabDto(task.Id, task.Title, task.Description, (int)task.Status, task.ProjectId, task.AssignedToId);
-        await _hub.Clients.All.SendCoreAsync("TaskUpdated", new object[] { dto });
-        await _hub.Clients.Group($"project-{task.ProjectId}").SendCoreAsync("TaskUpdated", new object[] { dto });
+        var collabDto = new AspireApp.ApiService.Dto.TaskCollabDto(task.Id, task.Title, task.Description, (int)task.Status, task.ProjectId, task.AssignedToId);
+        await _hub.Clients.All.SendCoreAsync("TaskUpdated", new object[] { collabDto });
+        await _hub.Clients.Group($"project-{task.ProjectId}").SendCoreAsync("TaskUpdated", new object[] { collabDto });
         return NoContent();
     }
 

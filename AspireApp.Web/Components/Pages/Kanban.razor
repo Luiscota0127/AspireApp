@@ -1,0 +1,401 @@
+@using AspireApp.Web.Services
+@implements IAsyncDisposable
+@inject ApiAuthService Api
+@inject CollaborationService Collab
+<h3>Kanban</h3>
+
+@if (loadError != null)
+{
+    <div class="alert alert-warning d-flex align-items-center gap-2" role="alert">
+        <span>@loadError</span>
+        <button class="btn btn-sm btn-outline-secondary ms-auto" @onclick="RetryAsync">Reintentar</button>
+    </div>
+}
+
+<div class="kanban-toolbar">
+    <input class="form-control form-control-sm" placeholder="Nueva tarea..."
+           @bind="newTitle" @bind:event="oninput" @onkeydown="OnNewTitleKeyDown" />
+    <input class="form-control form-control-sm" placeholder="Asignar a (email o id)"
+           @bind="newAssigned" @bind:event="oninput" />
+    <button class="btn btn-primary btn-sm" @onclick="CreateTaskAsync" disabled="@creating">
+        @(creating ? "Añadiendo..." : "Añadir")
+    </button>
+</div>
+
+@if (isLoading)
+{
+    <p class="text-muted">Cargando tareas...</p>
+}
+else
+{
+    <div class="kanban-board">
+        @foreach (var column in Columns)
+        {
+            var target = column.Status;
+            var dropClass = _dragOverStatus == target ? "kanban-column kanban-column--active" : "kanban-column";
+            <div class="@dropClass"
+                 @ondragover="e => OnDragOver(e, target)"
+                 @ondragleave="e => OnDragLeave(e, target)"
+                 @ondrop="e => OnDropAsync(e, target)">
+                <div class="kanban-column__header">
+                    <span>@column.Title</span>
+                    <span class="badge bg-secondary">@column.Items.Count</span>
+                </div>
+
+                @if (column.Items.Count == 0)
+                {
+                    <p class="kanban-column__empty">Sin tareas</p>
+                }
+
+                @foreach (var task in column.Items)
+                {
+                    var dragging = _draggingId == task.Id;
+                    <div class="kanban-card @(dragging ? "kanban-card--dragging" : "")"
+                         draggable="true"
+                         @ondragstart="e => OnDragStart(e, task.Id)"
+                         @ondragend="OnDragEnd">
+                        <strong class="kanban-card__title">@task.Title</strong>
+                        @if (!string.IsNullOrWhiteSpace(task.Description))
+                        {
+                            <div class="kanban-card__desc">@task.Description</div>
+                        }
+                        <div class="kanban-card__footer">
+                            <button class="btn btn-sm btn-outline-secondary" title="Mover a la izquierda"
+                                    disabled="@(task.Status == (int)ApiAuthService.TaskStatus.Todo)"
+                                    @onclick="() => MoveAsync(task, -1)">&#8592;</button>
+                            <button class="btn btn-sm btn-outline-secondary" title="Mover a la derecha"
+                                    disabled="@(task.Status == (int)ApiAuthService.TaskStatus.Done)"
+                                    @onclick="() => MoveAsync(task, 1)">&#8594;</button>
+
+                            @if (_confirmDeleteId == task.Id)
+                            {
+                                <button class="btn btn-sm btn-danger ms-auto"
+                                        disabled="@(deletingId == task.Id)"
+                                        @onclick="() => DeleteTaskAsync(task)">
+                                    @(deletingId == task.Id ? "..." : "Confirmar")
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary"
+                                        disabled="@(deletingId == task.Id)"
+                                        @onclick="CancelDelete">Cancelar</button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-sm btn-outline-danger ms-auto" title="Eliminar tarea"
+                                        @onclick="() => _confirmDeleteId = task.Id">&#10005;</button>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid ProjectId { get; set; }
+
+    private readonly Dictionary<int, List<ApiAuthService.TaskDto>> _byStatus = new();
+    private bool isLoading;
+    private bool creating;
+    private string? loadError;
+    private string? newTitle;
+    private string? newAssigned;
+
+    // two-step delete: the id awaiting confirmation, then the one actually being removed
+    private Guid _confirmDeleteId = Guid.Empty;
+    private Guid deletingId = Guid.Empty;
+
+    // drag & drop state
+    private Guid _draggingId;
+    private int? _dragOverStatus;
+
+    private sealed record Column(int Status, string Title, List<ApiAuthService.TaskDto> Items);
+
+    private IEnumerable<Column> Columns => new[]
+    {
+        new Column((int)ApiAuthService.TaskStatus.Todo, "To Do", ItemsFor(ApiAuthService.TaskStatus.Todo)),
+        new Column((int)ApiAuthService.TaskStatus.InProgress, "In Progress", ItemsFor(ApiAuthService.TaskStatus.InProgress)),
+        new Column((int)ApiAuthService.TaskStatus.Done, "Done", ItemsFor(ApiAuthService.TaskStatus.Done)),
+    };
+
+    private List<ApiAuthService.TaskDto> ItemsFor(ApiAuthService.TaskStatus status)
+        => _byStatus.TryGetValue((int)status, out var list) ? list : new List<ApiAuthService.TaskDto>();
+
+    /// <summary>Handles both the first render and every later ProjectId change.</summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ProjectId == Guid.Empty || ProjectId == _subscribedProjectId)
+        {
+            return;
+        }
+
+        await UnsubscribeAsync();
+
+        _subscribedProjectId = ProjectId;
+        _byStatus.Clear();
+
+        // handlers are attached per project so disposing the component leaves nothing behind
+        Collab.OnTaskCreated += HandleTaskCreated;
+        Collab.OnTaskUpdated += HandleTaskUpdated;
+        Collab.OnTaskDeleted += HandleTaskDeleted;
+        _handlersAttached = true;
+
+        await Collab.StartAsync();
+        await Collab.SubscribeProjectAsync(ProjectId);
+        await LoadTasksAsync();
+    }
+
+    private Guid _subscribedProjectId;
+    private bool _handlersAttached;
+
+    private async Task LoadTasksAsync()
+    {
+        isLoading = true;
+        loadError = null;
+        try
+        {
+            var tasks = await Api.GetTasksByProjectAsync(ProjectId);
+            if (tasks == null)
+            {
+                loadError = "No se pudieron cargar las tareas. Revisa que la API esté disponible y que tengas sesión iniciada.";
+                return;
+            }
+
+            _byStatus.Clear();
+            foreach (var task in tasks)
+            {
+                Upsert(task);
+            }
+
+            if (tasks.Length == 0)
+            {
+                loadError = null;
+            }
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task RetryAsync() => await LoadTasksAsync();
+
+    private async Task CreateTaskAsync()
+    {
+        if (string.IsNullOrWhiteSpace(newTitle) || creating) return;
+
+        creating = true;
+        try
+        {
+            var id = await Api.CreateTaskAsync(
+                ProjectId,
+                newTitle.Trim(),
+                null,
+                string.IsNullOrWhiteSpace(newAssigned) ? null : newAssigned.Trim());
+
+            if (id == null)
+            {
+                loadError = "No se pudo crear la tarea.";
+                return;
+            }
+
+            newTitle = null;
+            newAssigned = null;
+            // SignalR usually pushes TaskCreated back to us; reload only as a fallback
+            await LoadTasksAsync();
+        }
+        finally
+        {
+            creating = false;
+        }
+    }
+
+    private async Task OnNewTitleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await CreateTaskAsync();
+    }
+
+    // ---- real-time handlers -------------------------------------------------
+
+    private Task HandleTaskCreated(ApiAuthService.TaskDto dto)
+    {
+        if (dto == null || dto.ProjectId != ProjectId) return Task.CompletedTask;
+        return InvokeAsync(() =>
+        {
+            Upsert(dto);
+            StateHasChanged();
+        });
+    }
+
+    private Task HandleTaskUpdated(ApiAuthService.TaskDto dto)
+    {
+        if (dto == null || dto.ProjectId != ProjectId) return Task.CompletedTask;
+        return InvokeAsync(() =>
+        {
+            Remove(dto.Id);
+            Upsert(dto);
+            StateHasChanged();
+        });
+    }
+
+    private Task HandleTaskDeleted(Guid id)
+    {
+        return InvokeAsync(() =>
+        {
+            Remove(id);
+            StateHasChanged();
+        });
+    }
+
+    private void Upsert(ApiAuthService.TaskDto dto)
+    {
+        if (!_byStatus.TryGetValue(dto.Status, out var list))
+        {
+            list = new List<ApiAuthService.TaskDto>();
+            _byStatus[dto.Status] = list;
+        }
+
+        var index = list.FindIndex(t => t.Id == dto.Id);
+        if (index >= 0) list[index] = dto;
+        else list.Add(dto);
+    }
+
+    private void Remove(Guid id)
+    {
+        foreach (var list in _byStatus.Values)
+        {
+            list.RemoveAll(t => t.Id == id);
+        }
+    }
+
+    // ---- drag & drop --------------------------------------------------------
+
+    private void OnDragStart(DragEventArgs e, Guid taskId)
+    {
+        _draggingId = taskId;
+        _dragOverStatus = null;
+    }
+
+    private void OnDragEnd()
+    {
+        _draggingId = Guid.Empty;
+        _dragOverStatus = null;
+    }
+
+    private void OnDragOver(DragEventArgs e, int status)
+    {
+        // required so the browser fires ondrop at all
+        e.DataTransfer.DropEffect = "move";
+        _dragOverStatus = status;
+    }
+
+    private void OnDragLeave(DragEventArgs e, int status)
+    {
+        if (_dragOverStatus == status) _dragOverStatus = null;
+    }
+
+    private Task OnDropAsync(DragEventArgs e, int status)
+    {
+        _dragOverStatus = null;
+        if (_draggingId == Guid.Empty) return Task.CompletedTask;
+
+        var id = _draggingId;
+        _draggingId = Guid.Empty;
+        return MoveToStatusAsync(id, status);
+    }
+
+    private async Task MoveAsync(ApiAuthService.TaskDto task, int direction)
+    {
+        var next = task.Status + direction;
+        if (next < (int)ApiAuthService.TaskStatus.Todo || next > (int)ApiAuthService.TaskStatus.Done) return;
+        await MoveToStatusAsync(task.Id, next);
+    }
+
+    private async Task MoveToStatusAsync(Guid taskId, int targetStatus)
+    {
+        var current = Find(taskId);
+        if (current == null || current.Status == targetStatus) return;
+
+        _byStatus.TryGetValue(current.Status, out var source);
+        var snapshot = source?.ToList() ?? new List<ApiAuthService.TaskDto>();
+
+        // optimistic move, rolled back below if the API refuses
+        Remove(taskId);
+        Upsert(current with { Status = targetStatus });
+        StateHasChanged();
+
+        var ok = await Api.UpdateTaskStatusAsync(taskId, (ApiAuthService.TaskStatus)targetStatus);
+        if (ok) return;
+
+        Remove(taskId);
+        foreach (var t in snapshot) Upsert(t);
+        loadError = "No se pudo mover la tarea. Puede que no tengas permiso sobre ella.";
+        StateHasChanged();
+    }
+
+    private ApiAuthService.TaskDto? Find(Guid id)
+        => _byStatus.Values.SelectMany(l => l).FirstOrDefault(t => t.Id == id);
+
+    // ---- delete -------------------------------------------------------------
+
+    private void CancelDelete()
+    {
+        _confirmDeleteId = Guid.Empty;
+    }
+
+    private async Task DeleteTaskAsync(ApiAuthService.TaskDto task)
+    {
+        if (deletingId != Guid.Empty) return;
+
+        deletingId = task.Id;
+        try
+        {
+            var ok = await Api.DeleteTaskAsync(task.Id);
+            if (!ok)
+            {
+                loadError = $"No se pudo eliminar \"{task.Title}\". Puede que no tengas permiso sobre ella.";
+                return;
+            }
+
+            // the API also broadcasts TaskDeleted; removing here keeps the UI immediate
+            Remove(task.Id);
+        }
+        finally
+        {
+            deletingId = Guid.Empty;
+            _confirmDeleteId = Guid.Empty;
+        }
+    }
+
+    // ---- teardown -----------------------------------------------------------
+
+    private async Task UnsubscribeAsync()
+    {
+        if (_handlersAttached)
+        {
+            Collab.OnTaskCreated -= HandleTaskCreated;
+            Collab.OnTaskUpdated -= HandleTaskUpdated;
+            Collab.OnTaskDeleted -= HandleTaskDeleted;
+            _handlersAttached = false;
+        }
+
+        if (_subscribedProjectId != Guid.Empty)
+        {
+            await Collab.UnsubscribeProjectAsync(_subscribedProjectId);
+            _subscribedProjectId = Guid.Empty;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await UnsubscribeAsync();
+        }
+        catch
+        {
+            // navigation away must never throw
+        }
+    }
+}

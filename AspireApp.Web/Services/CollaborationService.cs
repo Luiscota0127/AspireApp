@@ -16,8 +16,8 @@ public class CollaborationService : IAsyncDisposable
     public event Func<Guid, Task>? OnProjectDeleted;
     public event Func<Guid, string?, string?, Task>? OnProjectMemberAdded;
 
-    public event Func<object, Task>? OnTaskCreated;
-    public event Func<object, Task>? OnTaskUpdated;
+    public event Func<ApiAuthService.TaskDto, Task>? OnTaskCreated;
+    public event Func<ApiAuthService.TaskDto, Task>? OnTaskUpdated;
     public event Func<Guid, Task>? OnTaskDeleted;
 
         private readonly ApiAuthService _authService;
@@ -46,8 +46,8 @@ public class CollaborationService : IAsyncDisposable
             if (OnProjectMemberAdded != null) await OnProjectMemberAdded.Invoke(projectId, userId, role);
         });
 
-        _hub.On<object>("TaskCreated", async obj => await (OnTaskCreated?.Invoke(obj) ?? Task.CompletedTask));
-        _hub.On<object>("TaskUpdated", async obj => await (OnTaskUpdated?.Invoke(obj) ?? Task.CompletedTask));
+        _hub.On<ApiAuthService.TaskDto>("TaskCreated", async dto => await (OnTaskCreated?.Invoke(dto) ?? Task.CompletedTask));
+        _hub.On<ApiAuthService.TaskDto>("TaskUpdated", async dto => await (OnTaskUpdated?.Invoke(dto) ?? Task.CompletedTask));
         _hub.On<Guid>("TaskDeleted", async id => await (OnTaskDeleted?.Invoke(id) ?? Task.CompletedTask));
 
         // maintain a set of subscribed project ids for resubscription after reconnect
@@ -56,34 +56,59 @@ public class CollaborationService : IAsyncDisposable
 
     private readonly HashSet<Guid> _subscribedProjects;
 
+    // reference counts, because several components may watch the same project at once
+    private readonly Dictionary<Guid, int> _projectRefCounts = new();
+    private readonly SemaphoreSlim _startLock = new(1, 1);
+    private bool _handlersWired;
+
         public async Task StartAsync()
         {
+            // Starting an already-started hub connection throws, and every component
+            // that shows connection state calls this, so it must be idempotent.
+            await _startLock.WaitAsync();
             try
             {
+                if (_hub.State == HubConnectionState.Connected)
+                {
+                    return;
+                }
+
                 // attempt refresh before starting connection
                 await _authService.TryRefreshTokenAsync();
 
-                // start connection and resubscribe to default groups if necessary
-            // wire up reconnect events to resubscribe
-            _hub.Reconnecting += async ex =>
-            {
-                await NotifyConnectionChanged(ConnectionState.Reconnecting);
-            };
+                // wire the reconnect handlers exactly once
+                if (!_handlersWired)
+                {
+                    _hub.Reconnecting += async ex =>
+                    {
+                        await NotifyConnectionChanged(ConnectionState.Reconnecting);
+                    };
 
-            _hub.Reconnected += async connectionId =>
-            {
+                    _hub.Reconnected += async connectionId =>
+                    {
+                        await NotifyConnectionChanged(ConnectionState.Connected);
+                        // resubscribe to project groups
+                        await ResubscribeAllAsync();
+                    };
+
+                    _handlersWired = true;
+                }
+
+                if (_hub.State == HubConnectionState.Disconnected)
+                {
+                    await _hub.StartAsync();
+                }
+
                 await NotifyConnectionChanged(ConnectionState.Connected);
-                // resubscribe to project groups
-                await ResubscribeAllAsync();
-            };
-
-            await _hub.StartAsync();
-            await NotifyConnectionChanged(ConnectionState.Connected);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error starting hub connection");
                 await NotifyConnectionChanged(ConnectionState.Disconnected);
+            }
+            finally
+            {
+                _startLock.Release();
             }
         }
 
@@ -106,6 +131,15 @@ public class CollaborationService : IAsyncDisposable
 
     public async Task SubscribeProjectAsync(Guid projectId)
     {
+        // count the watchers: the first one joins the group, the rest just bump the count
+        var count = _projectRefCounts.TryGetValue(projectId, out var existing) ? existing : 0;
+        _projectRefCounts[projectId] = count + 1;
+
+        if (count > 0)
+        {
+            return;
+        }
+
         if (_subscribedProjects.Add(projectId))
         {
             try
@@ -121,6 +155,18 @@ public class CollaborationService : IAsyncDisposable
 
     public async Task UnsubscribeProjectAsync(Guid projectId)
     {
+        // only the last watcher actually leaves the group
+        if (_projectRefCounts.TryGetValue(projectId, out var count))
+        {
+            if (count > 1)
+            {
+                _projectRefCounts[projectId] = count - 1;
+                return;
+            }
+
+            _projectRefCounts.Remove(projectId);
+        }
+
         if (_subscribedProjects.Remove(projectId))
         {
             try

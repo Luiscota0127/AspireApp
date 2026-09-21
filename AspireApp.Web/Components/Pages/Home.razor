@@ -1,7 +1,9 @@
 ﻿@page "/"
-
+@inject NavigationManager Nav
 <PageTitle>Home</PageTitle>
 
-<h1>Hello, world!</h1>
-
-Welcome to your new app.
+@code {
+    // the root simply forwards into the app; the visitor is already signed in here,
+    // otherwise the [Authorize] attribute would have redirected to /login first
+    protected override void OnInitialized() => Nav.NavigateTo("/dashboard");
+}

@@ -1,19 +1,193 @@
+/* ==========================================================================
+   Design tokens
+   A single place for colour, spacing, radius and elevation. Everything below
+   reads from these, so the whole app can be re-themed by editing this block.
+   ========================================================================== */
+:root {
+    --brand-50: #eef2ff;
+    --brand-100: #e0e7ff;
+    --brand-200: #c7d2fe;
+    --brand-400: #818cf8;
+    --brand-500: #6366f1;
+    --brand-600: #4f46e5;
+    --brand-700: #4338ca;
+
+    --ink-900: #0f172a;
+    --ink-700: #334155;
+    --ink-500: #64748b;
+    --ink-400: #94a3b8;
+    --ink-200: #e2e8f0;
+    --ink-100: #f1f5f9;
+    --ink-50: #f8fafc;
+
+    --ok-500: #10b981;
+    --warn-500: #f59e0b;
+    --danger-500: #ef4444;
+    --danger-600: #dc2626;
+
+    --radius-sm: 6px;
+    --radius: 10px;
+    --radius-lg: 14px;
+
+    --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.06);
+    --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
+    --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08), 0 2px 4px rgba(15, 23, 42, 0.04);
+
+    --sidebar-w: 260px;
+    --topbar-h: 60px;
+
+    /* Bootstrap overrides so its components inherit the palette */
+    --bs-primary: var(--brand-600);
+    --bs-primary-rgb: 79, 70, 229;
+    --bs-body-color: var(--ink-900);
+    --bs-body-bg: var(--ink-50);
+    --bs-border-color: var(--ink-200);
+    --bs-link-color: var(--brand-600);
+    --bs-link-hover-color: var(--brand-700);
+}
+
 html, body {
-    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    height: 100%;
+}
+
+body {
+    font-family: "Inter", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    background-color: var(--ink-50);
+    color: var(--ink-900);
+    font-size: 0.9375rem;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
 }
 
 a, .btn-link {
-    color: #006bb7;
+    color: var(--brand-600);
+    text-decoration: none;
+}
+
+a:hover {
+    color: var(--brand-700);
 }
 
 .btn-primary {
-    color: #fff;
-    background-color: #1b6ec2;
-    border-color: #1861ac;
+    --bs-btn-bg: var(--brand-600);
+    --bs-btn-border-color: var(--brand-600);
+    --bs-btn-hover-bg: var(--brand-700);
+    --bs-btn-hover-border-color: var(--brand-700);
+    --bs-btn-active-bg: var(--brand-700);
+    --bs-btn-active-border-color: var(--brand-700);
+    --bs-btn-disabled-bg: var(--brand-400);
+    --bs-btn-disabled-border-color: var(--brand-400);
+    border-radius: var(--radius-sm);
+    font-weight: 500;
 }
 
-.btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {
-  box-shadow: 0 0 0 0.1rem white, 0 0 0 0.25rem #258cfb;
+.btn-outline-secondary,
+.btn-outline-danger {
+    --bs-btn-border-color: var(--ink-200);
+    --bs-btn-color: var(--ink-500);
+    --bs-btn-hover-bg: var(--ink-100);
+    --bs-btn-hover-color: var(--ink-900);
+    --bs-btn-hover-border-color: var(--ink-200);
+    border-radius: var(--radius-sm);
+}
+
+.btn-outline-danger:hover {
+    --bs-btn-hover-bg: #fef2f2;
+    --bs-btn-hover-color: var(--danger-600);
+    --bs-btn-hover-border-color: #fecaca;
+}
+
+.btn:focus, .btn:active:focus, .btn-link.nav-link:focus,
+.form-control:focus, .form-check-input:focus, .form-select:focus {
+    box-shadow: 0 0 0 3px var(--brand-100);
+    border-color: var(--brand-400);
+    outline: none;
+}
+
+.form-control, .form-select {
+    border-radius: var(--radius-sm);
+    border-color: var(--ink-200);
+    padding: 0.5rem 0.75rem;
+}
+
+.form-control::placeholder {
+    color: var(--ink-400);
+}
+
+/* Cards, used by the dashboard grid and anywhere a surface is needed */
+.card {
+    --bs-card-border-color: var(--ink-200);
+    --bs-card-border-radius: var(--radius);
+    --bs-card-inner-border-radius: var(--radius);
+    --bs-card-cap-bg: transparent;
+    box-shadow: var(--shadow-xs);
+}
+
+.text-muted {
+    color: var(--ink-500) !important;
+}
+
+/* Page headings ----------------------------------------------------------------- */
+.page-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.5rem;
+}
+
+.page-header__title {
+    font-size: 1.5rem;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    color: var(--ink-900);
+    margin: 0;
+}
+
+.page-header__subtitle {
+    color: var(--ink-500);
+    font-size: 0.875rem;
+    margin: 0.25rem 0 0;
+}
+
+.eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--ink-400);
+}
+
+.alert {
+    border-radius: var(--radius);
+    border-width: 1px;
+    font-size: 0.875rem;
+}
+
+.alert-warning {
+    background-color: #fffbeb;
+    border-color: #fde68a;
+    color: #92400e;
+}
+
+.alert-info {
+    background-color: var(--brand-50);
+    border-color: var(--brand-200);
+    color: var(--brand-700);
+}
+
+.empty-state {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: var(--ink-500);
+}
+
+.empty-state__icon {
+    font-size: 2rem;
+    opacity: 0.35;
+    display: block;
+    margin-bottom: 0.5rem;
 }
 
 .content {
@@ -53,4 +227,106 @@ h1:focus {
 
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
     text-align: start;
+}
+
+/* --------------------------------------------------------------------------
+   Login screen
+   -------------------------------------------------------------------------- */
+.login-container {
+    width: 100%;
+    max-width: 400px;
+    background: #fff;
+    border: 1px solid var(--ink-200);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    padding: 2rem;
+}
+
+.login-container .login-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    margin-bottom: 1.5rem;
+}
+
+.login-container .login-brand__mark {
+    width: 38px;
+    height: 38px;
+    border-radius: var(--radius-sm);
+    background: linear-gradient(135deg, var(--brand-500), var(--brand-700));
+    color: #fff;
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    font-size: 0.875rem;
+    letter-spacing: -0.02em;
+}
+
+.login-container h3 {
+    font-size: 1.25rem;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    margin: 0;
+}
+
+.login-container .form-label,
+.login-container label {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--ink-700);
+    margin-bottom: 0.375rem;
+}
+
+.login-container .btn-primary {
+    width: 100%;
+    padding: 0.6rem;
+    font-weight: 500;
+}
+
+/* --------------------------------------------------------------------------
+   Route loading placeholder
+   -------------------------------------------------------------------------- */
+.route-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 4rem 1rem;
+    color: var(--ink-500);
+    font-size: 0.875rem;
+}
+
+/* --------------------------------------------------------------------------
+   Sidebar user block
+   -------------------------------------------------------------------------- */
+.nav-user {
+    margin-top: auto;
+    padding: 1rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.nav-user__id {
+    color: #cbd5e1;
+    font-size: 0.75rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+.nav-user button {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #e2e8f0;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    padding: 0.3rem 0.6rem;
+}
+
+.nav-user button:hover {
+    background: rgba(255, 255, 255, 0.16);
+    color: #fff;
 }

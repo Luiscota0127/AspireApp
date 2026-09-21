@@ -14,6 +14,14 @@ public class RefreshTokenHandler : DelegatingHandler
         _httpFactory = httpFactory;
     }
 
+    /// <summary>
+    /// IHttpClientFactory builds its handlers from the root scope, so the ApiAuthService injected
+    /// into this constructor is not necessarily the circuit's instance. The caller therefore sets
+    /// the Authorization header itself (see ApiAuthService.SendAuthorizedAsync) and this handler
+    /// only has to deal with refreshing an expired token.
+    /// </summary>
+    private string? CurrentToken => _authService.JwtToken;
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         // Attach current token if present

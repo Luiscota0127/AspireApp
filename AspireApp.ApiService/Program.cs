@@ -98,6 +98,8 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.AddAuthorization();
 builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
 builder.Services.AddScoped<ITokenService, TokenService>();
 // SignalR
 builder.Services.AddSignalR();
@@ -110,6 +112,8 @@ if (app.Environment.IsDevelopment() || app.Environment.EnvironmentName == "Testi
     // expose detailed errors while developing or running integration tests
     app.UseDeveloperExceptionPage();
     app.MapOpenApi();
+    app.UseSwagger();   // Serves generated JSON
+    app.UseSwaggerUI(); // Serves Swagger UI page
 }
 else
 {

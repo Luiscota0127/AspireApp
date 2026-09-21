@@ -1,5 +1,6 @@
 using AspireApp.Web;
 using AspireApp.Web.Components;
+using Microsoft.AspNetCore.Components.Authorization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -21,7 +22,6 @@ builder.Services.AddHttpClient<WeatherApiClient>(client =>
     });
 
 // API HttpClients for AspireApp.ApiService
-builder.Services.AddTransient<AspireApp.Web.Services.RefreshTokenHandler>();
 builder.Services.AddHttpClient("ApiClientNoAuth", client =>
 {
     client.BaseAddress = new("https+http://apiservice");
@@ -34,7 +34,18 @@ builder.Services.AddHttpClient("ApiClient", client =>
     .AddHttpMessageHandler<AspireApp.Web.Services.RefreshTokenHandler>();
 
 // Auth/API helper service (scoped per user session)
+// NOTE: must be registered before RefreshTokenHandler, which resolves it lazily.
 builder.Services.AddScoped<AspireApp.Web.Services.ApiAuthService>();
+builder.Services.AddTransient<AspireApp.Web.Services.RefreshTokenHandler>();
+
+// Blazor authorization: makes [Authorize] and <AuthorizeRouteView> work in the circuit.
+// AddAuthorizationCore alone is not enough: AuthorizeRouteView also resolves
+// IAuthenticationService, which Blazor Server does not register by default.
+builder.Services.AddAuthorizationCore();
+builder.Services.AddScoped<Microsoft.AspNetCore.Authentication.IAuthenticationService,
+    AspireApp.Web.Services.JwtAuthenticationService>();
+builder.Services.AddCascadingAuthenticationState();
+builder.Services.AddScoped<AuthenticationStateProvider, AspireApp.Web.Services.JwtAuthenticationStateProvider>();
 // CollaborationService registration must remain to support real-time collaboration features.
 builder.Services.AddScoped<AspireApp.Web.Services.CollaborationService>();
 

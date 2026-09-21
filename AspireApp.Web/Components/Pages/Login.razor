@@ -1,32 +1,117 @@
 @page "/login"
+@using System.ComponentModel.DataAnnotations
 @inject AspireApp.Web.Services.ApiAuthService AuthService
 @inject NavigationManager Nav
 
-<h3>Login</h3>
+<div class="login-container">
+    <div class="login-brand">
+        <span class="login-brand__mark">AA</span>
+        <div>
+            <h3>Iniciar sesión</h3>
+            <p class="text-muted mb-0" style="font-size:0.8125rem;">Accede a tus proyectos y tableros</p>
+        </div>
+    </div>
 
-<EditForm Model="model" OnValidSubmit="HandleLogin">
-    <InputText @bind-Value="model.Email" placeholder="Email" />
-    <InputText @bind-Value="model.Password" placeholder="Password" type="password" />
-    <button type="submit">Login</button>
-</EditForm>
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger" role="alert">
+            @errorMessage
+        </div>
+    }
+
+    <EditForm Model="model" @formname="Login" OnValidSubmit="HandleLogin">
+        <DataAnnotationsValidator />
+        <ValidationSummary class="text-danger" />
+
+        <div class="form-group mb-3">
+            <label for="email">Email</label>
+            <InputText id="email" 
+                       type="email" 
+                       class="form-control" 
+                       @bind-Value="model.Email" 
+                       placeholder="Enter your email" />
+            <ValidationMessage For="() => model.Email" class="text-danger" />
+        </div>
+
+        <div class="form-group mb-3">
+            <label for="password">Password</label>
+            <InputText id="password" 
+                       type="password" 
+                       class="form-control" 
+                       @bind-Value="model.Password" 
+                       placeholder="Enter your password" />
+            <ValidationMessage For="() => model.Password" class="text-danger" />
+        </div>
+
+        <button type="submit" class="btn btn-primary" disabled="@isSubmitting">
+            @if (isSubmitting)
+            {
+                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                <span> Logging in...</span>
+            }
+            else
+            {
+                <span>Login</span>
+            }
+        </button>
+    </EditForm>
+</div>
 
 @code {
-    private LoginModel model = new();
+    [SupplyParameterFromForm(FormName = "Login")]
+    public LoginModel model { get; set; } = new();
+
+    /// <summary>Where to go after signing in; set by RedirectToLogin.</summary>
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+
+    private string? errorMessage;
+    private bool isSubmitting;
 
     private async Task HandleLogin()
     {
-        var ok = await AuthService.LoginAsync(model.Email, model.Password);
-        if (ok) Nav.NavigateTo("/dashboard");
-        else
+        isSubmitting = true;
+        errorMessage = null;
+
+        try
         {
-            // simple error handling
-            Console.WriteLine("Login failed");
+            var ok = await AuthService.LoginAsync(model.Email, model.Password);
+            if (ok)
+            {
+                // only honour a local path, so a crafted returnUrl cannot send us off-site
+                var target = "/dashboard";
+                if (!string.IsNullOrWhiteSpace(ReturnUrl) && ReturnUrl.StartsWith('/') && !ReturnUrl.StartsWith("//"))
+                {
+                    target = ReturnUrl;
+                }
+
+                Nav.NavigateTo(target);
+            }
+            else
+            {
+                errorMessage = "Invalid email or password. Please try again.";
+            }
+        }
+        catch (Exception ex)
+        {
+            // Log ex as needed
+            errorMessage = "An unexpected error occurred during login.";
+        }
+        finally
+        {
+            isSubmitting = false;
         }
     }
 
-    private class LoginModel
+    public class LoginModel
     {
+        [Required(ErrorMessage = "Email is required.")]
+        [EmailAddress(ErrorMessage = "Invalid email format.")]
         public string Email { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Password is required.")]
+
+        [MinLength(6, ErrorMessage = "Password must be at least 6 characters long.")]
         public string Password { get; set; } = string.Empty;
     }
 }

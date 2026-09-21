@@ -1,4 +1,8 @@
-﻿<script type="module" src="@Assets["Components/Layout/NavMenu.razor.js"]"></script>
+﻿@using Microsoft.AspNetCore.Components.Authorization
+@implements IDisposable
+@inject AspireApp.Web.Services.ApiAuthService AuthService
+@inject AuthenticationStateProvider AuthStateProvider
+<script type="module" src="@Assets["Components/Layout/NavMenu.razor.js"]"></script>
 
 <div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
@@ -35,9 +39,42 @@
         </div>
 
         <div class="nav-item px-3">
-            <NavLink class="nav-link" href="login">
-                <span class="bi bi-box-arrow-in-right" aria-hidden="true"></span> Login
+            <NavLink class="nav-link" href="kanban">
+                <span class="bi bi-columns-gap" aria-hidden="true"></span> Kanban
             </NavLink>
         </div>
+
     </nav>
+
+    @if (isAuthenticated)
+    {
+        <div class="nav-user">
+            <span class="nav-user__id">@currentUser</span>
+            <button @onclick="SignOutAsync" title="Cerrar sesión">Salir</button>
+        </div>
+    }
 </div>
+
+@code {
+    private bool isAuthenticated;
+    private string? currentUser;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = state.User;
+        isAuthenticated = user.Identity?.IsAuthenticated ?? false;
+        currentUser = user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+            ?? user.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+    }
+
+    private async Task SignOutAsync()
+    {
+        await AuthService.LogoutAsync();
+    }
+
+    public void Dispose()
+    {
+        // nothing subscribed; kept for symmetry with IDisposable in case the nav grows state
+    }
+}

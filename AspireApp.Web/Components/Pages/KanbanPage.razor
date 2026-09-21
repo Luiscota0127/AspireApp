@@ -1,0 +1,83 @@
+@page "/kanban"
+@using AspireApp.Web.Services
+@inject ApiAuthService Api
+<h3>Kanban</h3>
+
+@if (isLoading)
+{
+    <p class="text-muted">Cargando proyectos...</p>
+}
+else if (loadError != null)
+{
+    <div class="alert alert-warning d-flex align-items-center gap-2" role="alert">
+        <span>@loadError</span>
+        <button class="btn btn-sm btn-outline-secondary ms-auto" @onclick="LoadProjectsAsync">Reintentar</button>
+    </div>
+}
+else if (projects == null || projects.Length == 0)
+{
+    <div class="alert alert-info" role="alert">
+        No hay proyectos todavía. Crea uno desde el <a href="/dashboard">Dashboard</a> para empezar a usar el tablero.
+    </div>
+}
+else
+{
+    <select class="form-select form-select-sm mb-3" style="max-width: 24rem;"
+            value="@selectedProjectId" @onchange="OnProjectChange">
+        <option value="">-- Selecciona un proyecto --</option>
+        @foreach (var p in projects)
+        {
+            <option value="@p.Id">@p.Name</option>
+        }
+    </select>
+
+    @if (selectedProjectId != Guid.Empty)
+    {
+        <Kanban @key="selectedProjectId" ProjectId="selectedProjectId" />
+    }
+}
+
+@code {
+    private ApiAuthService.ProjectDto[]? projects;
+    private Guid selectedProjectId = Guid.Empty;
+    private bool isLoading;
+    private string? loadError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadProjectsAsync();
+    }
+
+    private async Task LoadProjectsAsync()
+    {
+        isLoading = true;
+        loadError = null;
+        try
+        {
+            var result = await Api.GetProjectsAsync();
+            if (result == null)
+            {
+                projects = null;
+                loadError = "No se pudieron cargar los proyectos. Revisa que la API esté disponible y que tengas sesión iniciada.";
+                return;
+            }
+
+            projects = result;
+
+            // keep the selection only if that project still exists
+            if (selectedProjectId != Guid.Empty && result.All(p => p.Id != selectedProjectId))
+            {
+                selectedProjectId = Guid.Empty;
+            }
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void OnProjectChange(ChangeEventArgs e)
+    {
+        selectedProjectId = Guid.TryParse(e.Value?.ToString(), out var id) ? id : Guid.Empty;
+    }
+}

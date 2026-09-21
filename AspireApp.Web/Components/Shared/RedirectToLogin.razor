@@ -1,0 +1,28 @@
+@inject NavigationManager Nav
+@code {
+    private bool redirecting;
+
+    /// <summary>
+    /// Sends an unauthenticated visitor to /login, remembering where they were heading
+    /// so the login page can return them there afterwards.
+    ///
+    /// This runs on the first interactive render rather than in OnInitialized: during the
+    /// static prerender there is no circuit yet, and a navigation issued there is dropped.
+    /// </summary>
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender || redirecting)
+        {
+            return;
+        }
+
+        redirecting = true;
+
+        var returnUrl = Nav.ToBaseRelativePath(Nav.Uri);
+        var target = string.IsNullOrEmpty(returnUrl) || returnUrl.StartsWith("login")
+            ? "/login"
+            : $"/login?returnUrl={Uri.EscapeDataString("/" + returnUrl)}";
+
+        Nav.NavigateTo(target, forceLoad: false);
+    }
+}

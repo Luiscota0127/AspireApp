@@ -1,25 +1,37 @@
-﻿@inherits LayoutComponentBase
+﻿@using AspireApp.Web.Components.Shared
+@inherits LayoutComponentBase
 @inject AspireApp.Web.Services.ApiAuthService AuthService
 @inject IJSRuntime JS
+@inject NavigationManager Nav
 
-<div class="page">
-    <div class="sidebar">
-        <NavMenu />
-    </div>
-
-    <main>
-        <div class="top-row px-4 d-flex align-items-center">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
-            <div class="ms-auto">
-                <Components.Shared.ConnectionStatus />
-            </div>
+@if (onLoginPage)
+{
+    // the login screen owns the whole viewport: no sidebar, no chrome
+    <main class="auth-shell">
+        @Body
+    </main>
+}
+else
+{
+    <div class="page">
+        <div class="sidebar">
+            <NavMenu />
         </div>
 
-        <article class="content px-4">
-            @Body
-        </article>
-    </main>
-</div>
+        <main>
+            <div class="top-row px-4 d-flex align-items-center">
+                <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
+                <div class="ms-auto">
+                    <Components.Shared.ConnectionStatus />
+                </div>
+            </div>
+
+            <article class="content px-4">
+                @Body
+            </article>
+        </main>
+    </div>
+}
 
 <div id="blazor-error-ui">
     An unhandled error has occurred.
@@ -28,8 +40,66 @@
 </div>
 
 @code {
-    protected override async Task OnInitializedAsync()
+    private bool authInitialized;
+    private bool onLoginPage;
+
+    /// <summary>Pages that render without a session.</summary>
+    private static readonly string[] publicRoutes = { "login", "register" };
+
+    // OnInitializedAsync also runs during the static prerender, where JS interop is
+    // unavailable and reading localStorage throws. Rehydrate on the first interactive
+    // render instead, so the token is present before any API call is made.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        await AuthService.InitializeAsync();
+        if (firstRender && !authInitialized)
+        {
+            authInitialized = true;
+            await AuthService.InitializeAsync();
+            StateHasChanged();
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        onLoginPage = IsPublicRoute();
+
+        // enforce the session as early as JS interop allows, so a protected page does not
+        // flash its (empty) content before the redirect to /login lands
+        if (!_guardChecked)
+        {
+            _guardChecked = true;
+            await AuthService.EnsureTokenLoadedAsync();
+            GuardSession();
+        }
+    }
+
+    private bool _guardChecked;
+
+    private bool IsPublicRoute()
+    {
+        var path = Nav.ToBaseRelativePath(Nav.Uri);
+        return publicRoutes.Any(r => path.StartsWith(r, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Sends a visitor without a session to /login, carrying the page they wanted.
+    ///
+    /// This is done here rather than with AuthorizeRouteView: that component resolves the
+    /// authentication state asynchronously, and under the static prerender it never leaves
+    /// the Authorizing state, which leaves the response empty instead of redirecting.
+    /// </summary>
+    private void GuardSession()
+    {
+        if (IsPublicRoute() || !string.IsNullOrEmpty(AuthService.JwtToken))
+        {
+            return;
+        }
+
+        var returnUrl = Nav.ToBaseRelativePath(Nav.Uri);
+        var target = string.IsNullOrEmpty(returnUrl)
+            ? "/login"
+            : $"/login?returnUrl={Uri.EscapeDataString("/" + returnUrl)}";
+
+        Nav.NavigateTo(target, forceLoad: true);
     }
 }

@@ -26,14 +26,23 @@ public class ProjectsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> Get()
     {
-        var projects = await _db.Projects.Include(p => p.Tasks).ToListAsync();
+        // project into a DTO: returning the entity graph would serialize
+        // Project.Tasks and Task.Project back and forth until the JSON depth limit.
+        var projects = await _db.Projects
+            .AsNoTracking()
+            .Select(p => new AspireApp.ApiService.Dto.ProjectCollabDto(p.Id, p.Name, p.Description))
+            .ToListAsync();
         return Ok(projects);
     }
 
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> Get(Guid id)
     {
-        var project = await _db.Projects.Include(p => p.Tasks).FirstOrDefaultAsync(p => p.Id == id);
+        var project = await _db.Projects
+            .AsNoTracking()
+            .Where(p => p.Id == id)
+            .Select(p => new AspireApp.ApiService.Dto.ProjectCollabDto(p.Id, p.Name, p.Description))
+            .FirstOrDefaultAsync();
         if (project == null) return NotFound();
         return Ok(project);
     }

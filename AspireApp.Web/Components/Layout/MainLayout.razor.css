@@ -4,6 +4,16 @@
     flex-direction: column;
 }
 
+/* login owns the viewport: no sidebar, no top bar */
+.auth-shell {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at 20% 0%, #eef2ff 0%, #f8fafc 45%, #f8fafc 100%);
+    padding: 1.5rem;
+}
+
 main {
     flex: 1;
 }

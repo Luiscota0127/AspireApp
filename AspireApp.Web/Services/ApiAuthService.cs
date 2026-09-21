@@ -17,6 +17,13 @@ public class ApiAuthService
     public string? RefreshToken { get; private set; }
     private readonly System.Threading.SemaphoreSlim _refreshLock = new(1, 1);
 
+    /// <summary>
+    /// Raised whenever the signed-in identity changes (login, refresh, logout).
+    /// JwtAuthenticationStateProvider subscribes to this, which avoids a circular
+    /// dependency between the two services.
+    /// </summary>
+    public event Action? AuthenticationStateChanged;
+
     public ApiAuthService(IHttpClientFactory httpFactory, NavigationManager nav, IJSRuntime jsRuntime)
     {
         _httpFactory = httpFactory;
@@ -24,25 +31,28 @@ public class ApiAuthService
         _jsRuntime = jsRuntime;
     }
 
+    /// <summary>
+    /// Reads the persisted tokens back out of browser storage.
+    /// Must be called from an interactive render: during the static prerender there is no
+    /// JS interop available and this would silently leave JwtToken null.
+    /// </summary>
     public async Task InitializeAsync()
     {
-        try
+        var json = await _jsRuntime.InvokeAsync<string>("localStorage.getItem", "aspire_auth");
+        if (string.IsNullOrEmpty(json))
         {
-            var json = await _jsRuntime.InvokeAsync<string>("localStorage.getItem", "aspire_auth");
-            if (!string.IsNullOrEmpty(json))
-            {
-                var stored = JsonSerializer.Deserialize<AuthStorage>(json);
-                if (stored != null)
-                {
-                    JwtToken = stored.Token;
-                    RefreshToken = stored.RefreshToken;
-                }
-            }
+            return;
         }
-        catch
+
+        var stored = JsonSerializer.Deserialize<AuthStorage>(json);
+        if (stored == null)
         {
-            // ignore storage errors
+            return;
         }
+
+        JwtToken = stored.Token;
+        RefreshToken = stored.RefreshToken;
+        AuthenticationStateChanged?.Invoke();
     }
 
     private static DateTimeOffset? GetExpiryFromToken(string? token)
@@ -88,6 +98,52 @@ public class ApiAuthService
         return _httpFactory.CreateClient("ApiClient");
     }
 
+    /// <summary>
+    /// Sends a request with the current user's bearer token attached.
+    /// The token cannot be attached by the HTTP handler: IHttpClientFactory builds handlers
+    /// from the root scope, so a handler never sees the circuit's ApiAuthService instance.
+    /// </summary>
+    private async Task<HttpResponseMessage> SendAuthorizedAsync(
+        HttpMethod method, string url, HttpContent? content = null)
+    {
+        await EnsureTokenLoadedAsync();
+
+        using var request = new HttpRequestMessage(method, url) { Content = content };
+        if (!string.IsNullOrEmpty(JwtToken))
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", JwtToken);
+        }
+
+        return await CreateClient().SendAsync(request);
+    }
+
+    private bool _storageHydrated;
+
+    /// <summary>
+    /// Guarantees the in-memory token matches browser storage before an authenticated call.
+    /// The circuit can outlive a navigation, and the first interactive render may not have
+    /// happened yet, so this cannot rely on a component's lifecycle to have run first.
+    /// Safe to call repeatedly: it only touches storage once.
+    /// </summary>
+    public async Task EnsureTokenLoadedAsync()
+    {
+        if (_storageHydrated || !string.IsNullOrEmpty(JwtToken))
+        {
+            return;
+        }
+
+        _storageHydrated = true;
+        try
+        {
+            await InitializeAsync();
+        }
+        catch (InvalidOperationException)
+        {
+            // no JS interop yet (static prerender); retry on the next call
+            _storageHydrated = false;
+        }
+    }
+
     public async Task<bool> LoginAsync(string email, string password)
     {
         var client = _httpFactory.CreateClient("ApiClientNoAuth");
@@ -99,6 +155,7 @@ public class ApiAuthService
         // persist tokens in protected session storage
         var storage = System.Text.Json.JsonSerializer.Serialize(new AuthStorage { Token = JwtToken, RefreshToken = RefreshToken });
         await _jsRuntime.InvokeVoidAsync("localStorage.setItem", "aspire_auth", storage);
+        AuthenticationStateChanged?.Invoke();
         return !string.IsNullOrEmpty(JwtToken);
     }
 
@@ -113,17 +170,17 @@ public class ApiAuthService
     {
         JwtToken = null;
         RefreshToken = null;
+        _storageHydrated = true;
         await _jsRuntime.InvokeVoidAsync("localStorage.removeItem", "aspire_auth");
+        AuthenticationStateChanged?.Invoke();
         _nav.NavigateTo("/login");
     }
 
     public async Task<ProjectDto[]?> GetProjectsAsync()
     {
-        var client = CreateClient();
-        var resp = await client.GetAsync("api/projects");
+        using var resp = await SendAuthorizedAsync(HttpMethod.Get, "api/projects");
         if (!resp.IsSuccessStatusCode) return null;
-        var result = await resp.Content.ReadFromJsonAsync<ProjectDto[]>();
-        return result;
+        return await resp.Content.ReadFromJsonAsync<ProjectDto[]>();
     }
 
     public async Task<ProjectMemberDto[]?> GetProjectMembersAsync(Guid projectId)
@@ -150,6 +207,74 @@ public class ApiAuthService
 
     public record ProjectMemberDto(Guid Id, Guid ProjectId, string? UserId, string? Email, string Role);
 
+    // Task DTOs and helpers for client
+    public enum TaskStatus { Todo = 0, InProgress = 1, Done = 2 }
+    public record TaskDto(Guid Id, string Title, string? Description, int Status, Guid ProjectId, string? AssignedToId, DateTime? DueDate);
+
+    public async Task<TaskDto[]?> GetTasksByProjectAsync(Guid projectId)
+    {
+        using var resp = await SendAuthorizedAsync(HttpMethod.Get, "api/tasks");
+        if (!resp.IsSuccessStatusCode) return null;
+        var all = await resp.Content.ReadFromJsonAsync<TaskDto[]>();
+        if (all == null) return Array.Empty<TaskDto>();
+        return all.Where(t => t.ProjectId == projectId).ToArray();
+    }
+
+    public async Task<TaskDto?> GetTaskAsync(Guid taskId)
+    {
+        using var resp = await SendAuthorizedAsync(HttpMethod.Get, $"api/tasks/{taskId}");
+        if (!resp.IsSuccessStatusCode) return null;
+        return await resp.Content.ReadFromJsonAsync<TaskDto>();
+    }
+
+    public async Task<bool> UpdateTaskStatusAsync(Guid taskId, TaskStatus status)
+    {
+        var existing = await GetTaskAsync(taskId);
+        if (existing == null) return false;
+
+        // The API expects TaskUpdateDto: Title, Description, Status (enum), DueDate, AssignedToId
+        var payload = new
+        {
+            Title = existing.Title,
+            Description = existing.Description,
+            Status = (int)status,
+            DueDate = existing.DueDate,
+            AssignedToId = existing.AssignedToId
+        };
+
+        using var resp = await SendAuthorizedAsync(
+            HttpMethod.Put,
+            $"api/tasks/{taskId}",
+            JsonContent.Create(payload));
+        return resp.IsSuccessStatusCode;
+    }
+
+    public async Task<Guid?> CreateTaskAsync(Guid projectId, string title, string? description, string? assignedToId)
+    {
+        var payload = new
+        {
+            ProjectId = projectId,
+            Title = title,
+            Description = description,
+            AssignedToId = assignedToId
+        };
+
+        using var resp = await SendAuthorizedAsync(
+            HttpMethod.Post,
+            "api/tasks",
+            JsonContent.Create(payload));
+        if (!resp.IsSuccessStatusCode) return null;
+        // API returns the created task DTO; attempt to read it
+        var created = await resp.Content.ReadFromJsonAsync<TaskDto>();
+        return created?.Id;
+    }
+
+    public async Task<bool> DeleteTaskAsync(Guid taskId)
+    {
+        using var resp = await SendAuthorizedAsync(HttpMethod.Delete, $"api/tasks/{taskId}");
+        return resp.IsSuccessStatusCode;
+    }
+
     public async Task<bool> TryRefreshTokenAsync()
     {
         if (string.IsNullOrEmpty(RefreshToken)) return false;
@@ -170,6 +295,7 @@ public class ApiAuthService
             RefreshToken = data.RefreshToken;
             var json = System.Text.Json.JsonSerializer.Serialize(new AuthStorage { Token = JwtToken, RefreshToken = RefreshToken });
             await _jsRuntime.InvokeVoidAsync("localStorage.setItem", "aspire_auth", json);
+            AuthenticationStateChanged?.Invoke();
             return true;
         }
         finally
