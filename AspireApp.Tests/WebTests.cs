@@ -4,7 +4,10 @@ namespace AspireApp.Tests;
 
 public class WebTests
 {
-    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
+    // Cold start includes: DCP orchestration, Redis container, EF migrations + seed,
+    // an HTTP health-check first attempt that can burn a 10s timeout, and two app
+    // executables. 30s was too tight on a cold cache and cancelled startup mid-flight.
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(90);
 
     [Test]
     public async Task GetWebResourceRootReturnsOkStatusCode()
