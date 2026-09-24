@@ -1,11 +1,16 @@
 @page "/kanban"
 @using AspireApp.Web.Services
 @inject ApiAuthService Api
-<h3>Kanban</h3>
 
+<PageTitle>Kanban</PageTitle>
+
+@* Project picker for the board. Once one is chosen the board renders below with
+   its own header, so this page only owns the selection and empty/error states. *@
 @if (isLoading)
 {
-    <p class="text-muted">Cargando proyectos...</p>
+    <div class="empty-state">
+        <p>Cargando proyectos…</p>
+    </div>
 }
 else if (loadError != null)
 {
@@ -22,26 +27,57 @@ else if (projects == null || projects.Length == 0)
 }
 else
 {
-    <select class="form-select form-select-sm mb-3" style="max-width: 24rem;"
-            value="@selectedProjectId" @onchange="OnProjectChange">
-        <option value="">-- Selecciona un proyecto --</option>
-        @foreach (var p in projects)
-        {
-            <option value="@p.Id">@p.Name</option>
-        }
-    </select>
+    @if (selectedProjectId == Guid.Empty)
+    {
+        <div class="page-header">
+            <div>
+                <p class="eyebrow">Tableros</p>
+                <h1 class="page-header__title">Kanban</h1>
+                <p class="page-header__subtitle">Escoge un proyecto para abrir su tablero.</p>
+            </div>
+        </div>
+    }
+
+    <div class="kanban-picker">
+        <label for="project-picker">Proyecto</label>
+        <select id="project-picker" class="form-select"
+                value="@selectedProjectId" @onchange="OnProjectChange">
+            <option value="">— Selecciona un proyecto —</option>
+            @foreach (var p in projects)
+            {
+                <option value="@p.Id">@p.Name</option>
+            }
+        </select>
+    </div>
 
     @if (selectedProjectId != Guid.Empty)
     {
-        <Kanban @key="selectedProjectId" ProjectId="selectedProjectId" />
+        @* The leading @ is required, otherwise the parameter receives the literal
+           text "SelectedProjectName" instead of the resolved property value. *@
+        <Kanban @key="selectedProjectId" ProjectId="selectedProjectId" ProjectName="@SelectedProjectName" />
     }
 }
+
+<style>
+    .kanban-picker {
+        max-width: 26rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .kanban-picker label {
+        display: block;
+    }
+</style>
 
 @code {
     private ApiAuthService.ProjectDto[]? projects;
     private Guid selectedProjectId = Guid.Empty;
     private bool isLoading;
     private string? loadError;
+
+    /// <summary>Board title and the prefix of each card key.</summary>
+    private string? SelectedProjectName
+        => projects?.FirstOrDefault(p => p.Id == selectedProjectId)?.Name;
 
     protected override async Task OnInitializedAsync()
     {
@@ -63,7 +99,6 @@ else
             }
 
             projects = result;
-
             // keep the selection only if that project still exists
             if (selectedProjectId != Guid.Empty && result.All(p => p.Id != selectedProjectId))
             {

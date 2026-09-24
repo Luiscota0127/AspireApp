@@ -1,80 +1,121 @@
-﻿@using Microsoft.AspNetCore.Components.Authorization
-@implements IDisposable
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Routing
 @inject AspireApp.Web.Services.ApiAuthService AuthService
 @inject AuthenticationStateProvider AuthStateProvider
-<script type="module" src="@Assets["Components/Layout/NavMenu.razor.js"]"></script>
+@inject NavigationManager Nav
 
-<div class="top-row ps-3 navbar navbar-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="">AspireApp</a>
+@* Brand block. The href is empty so the link always points at the app entry point. *@
+<a class="rail-brand" href="">
+    <span class="rail-brand__mark" aria-hidden="true">A</span>
+    <span class="rail-brand__text">
+        <strong>AspireApp</strong>
+        <small>Workspace</small>
+    </span>
+</a>
+
+<nav class="rail-nav" aria-label="Secciones">
+    <p class="rail-group">Principal</p>
+
+    <NavLink class="rail-link" href="" Match="NavLinkMatch.All">
+        <span class="rail-link__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.8V20h14V9.8" />
+            </svg>
+        </span>
+        <span class="rail-link__label">Inicio</span>
+    </NavLink>
+
+    <NavLink class="rail-link" href="dashboard">
+        <span class="rail-link__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="7.5" height="7.5" rx="1.5" /><rect x="13.5" y="3" width="7.5" height="4.5" rx="1.5" />
+                <rect x="13.5" y="10.5" width="7.5" height="10.5" rx="1.5" /><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5" />
+            </svg>
+        </span>
+        <span class="rail-link__label">Dashboard</span>
+    </NavLink>
+
+    <NavLink class="rail-link" href="kanban">
+        <span class="rail-link__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="5" height="16" rx="1.5" /><rect x="9.5" y="4" width="5" height="10" rx="1.5" /><rect x="16" y="4" width="5" height="13" rx="1.5" />
+            </svg>
+        </span>
+        <span class="rail-link__label">Kanban</span>
+    </NavLink>
+
+    <p class="rail-group">Datos</p>
+
+    <NavLink class="rail-link" href="weather">
+        <span class="rail-link__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17.5 18a4.5 4.5 0 0 0 .3-9 6 6 0 0 0-11.5 1.6A3.7 3.7 0 0 0 7 18Z" />
+            </svg>
+        </span>
+        <span class="rail-link__label">Clima</span>
+    </NavLink>
+
+    <NavLink class="rail-link" href="counter">
+        <span class="rail-link__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="4" y="3" width="16" height="18" rx="2.5" /><path d="M8 8h8M8 12h8M8 16h4" />
+            </svg>
+        </span>
+        <span class="rail-link__label">Contador</span>
+    </NavLink>
+</nav>
+
+@if (isAuthenticated)
+{
+    <div class="nav-user">
+        <span class="nav-user__avatar" aria-hidden="true">@Initials</span>
+        <span class="nav-user__meta">
+            <span class="nav-user__id" title="@currentUser">@currentUser</span>
+            <span class="nav-user__hint">Sesión activa</span>
+        </span>
+        <button type="button" @onclick="SignOutAsync" title="Cerrar sesión">Salir</button>
     </div>
-</div>
-
-<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
-
-<div id="nav-scrollable" class="nav-scrollable">
-    <nav class="nav flex-column">
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="bi bi-house-door-fill" aria-hidden="true"></span> Home
-            </NavLink>
-        </div>
-
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="counter">
-                <span class="bi bi-plus-square-fill" aria-hidden="true"></span> Counter
-            </NavLink>
-        </div>
-
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="weather">
-                <span class="bi bi-list-nested" aria-hidden="true"></span> Weather
-            </NavLink>
-        </div>
-
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="dashboard">
-                <span class="bi bi-kanban" aria-hidden="true"></span> Dashboard
-            </NavLink>
-        </div>
-
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="kanban">
-                <span class="bi bi-columns-gap" aria-hidden="true"></span> Kanban
-            </NavLink>
-        </div>
-
-    </nav>
-
-    @if (isAuthenticated)
-    {
-        <div class="nav-user">
-            <span class="nav-user__id">@currentUser</span>
-            <button @onclick="SignOutAsync" title="Cerrar sesión">Salir</button>
-        </div>
-    }
-</div>
+}
 
 @code {
     private bool isAuthenticated;
     private string? currentUser;
+
+    /// <summary>Two-letter monogram for the avatar.</summary>
+    private string Initials => MakeInitials(currentUser);
+
+    /// <summary>
+    /// Monogram from the email local part: "ana.lopez@x" becomes "AL". Falls back to
+    /// the first two characters, then to a neutral glyph when there is no user.
+    /// </summary>
+    private static string MakeInitials(string? source)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return "··";
+        }
+
+        var local = source.Split('@')[0];
+        var parts = local.Split(new[] { '.', '_', '-' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 2)
+        {
+            return $"{parts[0][0]}{parts[1][0]}".ToUpperInvariant();
+        }
+
+        return (local.Length >= 2 ? local[..2] : local[..1]).ToUpperInvariant();
+    }
 
     protected override async Task OnInitializedAsync()
     {
         var state = await AuthStateProvider.GetAuthenticationStateAsync();
         var user = state.User;
         isAuthenticated = user.Identity?.IsAuthenticated ?? false;
-        currentUser = user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
-            ?? user.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+        currentUser = user.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+            ?? user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
     }
 
     private async Task SignOutAsync()
     {
         await AuthService.LogoutAsync();
-    }
-
-    public void Dispose()
-    {
-        // nothing subscribed; kept for symmetry with IDisposable in case the nav grows state
     }
 }

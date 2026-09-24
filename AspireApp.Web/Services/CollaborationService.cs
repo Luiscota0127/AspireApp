@@ -24,13 +24,32 @@ public class CollaborationService : IAsyncDisposable
 
         public enum ConnectionState { Connected, Reconnecting, Disconnected }
 
+    /// <summary>
+    /// Builds the hubs/collab URL.
+    ///
+    /// Under Aspire the API is addressed as "https+http://apiservice", which the
+    /// service-discovery HttpClient handler understands but HubConnectionBuilder
+    /// does not: it rejects the scheme, so the SignalR connection never starts and
+    /// the board gets no real-time updates. Resolve the scheme here instead, using
+    /// the configured service endpoint when it is present and falling back to the
+    /// page origin (which is what an AppHost front-proxied deployment needs).
+    /// </summary>
+    private static string ResolveHubUrl(NavigationManager nav)
+    {
+        var configured = Environment.GetEnvironmentVariable("services__apiservice__https__0")
+            ?? Environment.GetEnvironmentVariable("services__apiservice__http__0");
+
+        var origin = string.IsNullOrWhiteSpace(configured) ? nav.BaseUri : configured;
+        return origin.TrimEnd('/') + "/hubs/collab";
+    }
+
     public CollaborationService(NavigationManager nav, ILogger<CollaborationService> logger, ApiAuthService authService)
     {
         _logger = logger;
         _authService = authService;
-        var hubUrl = new Uri("https+http://apiservice/hubs/collab");
+        var hubUrl = ResolveHubUrl(nav);
         _hub = new HubConnectionBuilder()
-            .WithUrl(hubUrl.ToString(), options =>
+            .WithUrl(hubUrl, options =>
             {
                 options.AccessTokenProvider = () => Task.FromResult(_authService.JwtToken);
             })

@@ -1,27 +1,141 @@
 @page "/dashboard"
 @inject AspireApp.Web.Services.ApiAuthService AuthService
 @inject AspireApp.Web.Services.CollaborationService Collaboration
+@implements IDisposable
 
-<h3>Dashboard</h3>
+<PageTitle>Dashboard</PageTitle>
+
+<div class="page-header">
+    <div>
+        <p class="eyebrow">Workspace</p>
+        <h1 class="page-header__title">Dashboard</h1>
+        <p class="page-header__subtitle">Tus proyectos y su actividad en tiempo real.</p>
+    </div>
+    @if (projects is { Length: > 0 })
+    {
+        <div class="page-header__actions">
+            <span class="stat__label">@projects.Length proyecto@(projects.Length == 1 ? "" : "s")</span>
+        </div>
+    }
+</div>
 
 @if (projects == null)
 {
-    <p>No projects or authentication required.</p>
+    <div class="empty-state">
+        <span class="empty-state__icon" aria-hidden="true">◎</span>
+        <p>No projects or authentication required.</p>
+    </div>
+}
+else if (projects.Length == 0)
+{
+    <div class="empty-state">
+        <span class="empty-state__icon" aria-hidden="true">▤</span>
+        <p class="mb-1"><strong>Aún no hay proyectos.</strong></p>
+        <p class="mb-0">Cuando se cree el primero aparecerá aquí con sus miembros y su tablero.</p>
+    </div>
 }
 else
 {
-    <ul>
+    <div class="project-grid">
         @foreach (var p in projects)
         {
-            <li>
-                <a href="/projects/@p.Id/members">@p.Name</a> - @p.Description
-            </li>
+            <a class="project-card" href="/projects/@p.Id/members">
+                <span class="project-card__mark" aria-hidden="true">@Mark(p.Name)</span>
+                <span class="project-card__body">
+                    <strong class="project-card__name">@p.Name</strong>
+                    <span class="project-card__desc">@(string.IsNullOrWhiteSpace(p.Description) ? "Sin descripción" : p.Description)</span>
+                </span>
+                <span class="project-card__go" aria-hidden="true">→</span>
+            </a>
         }
-    </ul>
+    </div>
 }
+
+<style>
+    /* Page-local grid: a card per project instead of a bare bullet list. */
+    .project-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+        gap: 0.875rem;
+    }
+
+    .project-card {
+        display: flex;
+        align-items: center;
+        gap: 0.85rem;
+        padding: 1rem 1.1rem;
+        background: var(--surface);
+        border: 1px solid var(--ink-200);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow-xs);
+        text-decoration: none;
+        color: inherit;
+        transition: transform 0.12s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+    }
+
+    .project-card:hover {
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-md);
+        border-color: var(--brand-300);
+    }
+
+    .project-card__mark {
+        width: 40px;
+        height: 40px;
+        flex-shrink: 0;
+        border-radius: var(--radius-sm);
+        background: var(--brand-50);
+        color: var(--brand-700);
+        display: grid;
+        place-items: center;
+        font-weight: 700;
+        font-size: 0.9375rem;
+        letter-spacing: -0.02em;
+    }
+
+    .project-card__body {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        flex: 1;
+    }
+
+    .project-card__name {
+        font-size: 0.9375rem;
+        font-weight: 650;
+        color: var(--ink-900);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .project-card__desc {
+        font-size: 0.8125rem;
+        color: var(--ink-500);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .project-card__go {
+        color: var(--ink-300);
+        font-size: 1rem;
+        flex-shrink: 0;
+        transition: transform 0.15s ease, color 0.15s ease;
+    }
+
+    .project-card:hover .project-card__go {
+        color: var(--brand-600);
+        transform: translateX(2px);
+    }
+</style>
 
 @code {
     private AspireApp.Web.Services.ApiAuthService.ProjectDto[]? projects;
+
+    /// <summary>Single-letter monogram shown on the project card.</summary>
+    private static string Mark(string? name)
+        => string.IsNullOrWhiteSpace(name) ? "#" : name.Trim()[..1].ToUpperInvariant();
 
     protected override async Task OnInitializedAsync()
     {
@@ -49,5 +163,12 @@ else
     {
         _ = InvokeAsync(async () => projects = await AuthService.GetProjectsAsync());
         return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        Collaboration.OnProjectCreated -= HandleProjectCreated;
+        Collaboration.OnProjectUpdated -= HandleProjectUpdated;
+        Collaboration.OnProjectDeleted -= HandleProjectDeleted;
     }
 }

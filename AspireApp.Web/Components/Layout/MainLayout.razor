@@ -1,4 +1,4 @@
-﻿@using AspireApp.Web.Components.Shared
+@using AspireApp.Web.Components.Shared
 @inherits LayoutComponentBase
 @inject AspireApp.Web.Services.ApiAuthService AuthService
 @inject IJSRuntime JS
@@ -6,34 +6,57 @@
 
 @if (onLoginPage)
 {
-    // the login screen owns the whole viewport: no sidebar, no chrome
+    @* The login screen owns the whole viewport: no rail, no command bar. *@
     <main class="auth-shell">
         @Body
     </main>
 }
 else
 {
-    <div class="page">
-        <div class="sidebar">
+    <div class="app-shell" id="app-shell">
+        <a href="#main-content" class="skip-link">Saltar al contenido</a>
+
+        @* Primary destinations live in the rail; it slides in as a drawer on phones. *@
+        <aside class="app-rail" id="app-rail" aria-label="Navegación principal">
             <NavMenu />
-        </div>
+        </aside>
 
-        <main>
-            <div class="top-row px-4 d-flex align-items-center">
-                <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
-                <div class="ms-auto">
-                    <Components.Shared.ConnectionStatus />
+        @* Scrim behind the drawer on phones only. *@
+        <div class="app-scrim" id="app-scrim" aria-hidden="true"></div>
+
+        @* Shell chrome behaviour (drawer, scrim, breadcrumb) lives in its own component:
+           a dedicated OnAfterRenderAsync is more reliable than layout interop, which
+           runs in the same render pass as the initial auth rehydration. *@
+        <ShellChrome />
+
+        <div class="app-body">
+            <header class="app-topbar" id="app-topbar">
+                <button type="button" class="rail-toggle" id="rail-toggle"
+                        aria-controls="app-rail" aria-expanded="false" aria-label="Abrir navegación">
+                    <span aria-hidden="true">☰</span>
+                </button>
+
+                @* Shows the current section on phones, where the rail (and therefore the
+                   active-link label) is off-screen. Hidden on wide screens, where the rail
+                   already marks the active destination. *@
+                <span class="topbar-crumbs__current" id="topbar-crumbs__current">Inicio</span>
+
+                <div class="topbar-actions">
+                    <ConnectionStatus />
+                    <a class="topbar-link" href="https://learn.microsoft.com/aspnet/core/" target="_blank" rel="noreferrer">Docs</a>
                 </div>
-            </div>
+            </header>
 
-            <article class="content px-4">
-                @Body
-            </article>
-        </main>
+            <main id="main-content" class="app-content">
+                <div class="app-content__inner">
+                    @Body
+                </div>
+            </main>
+        </div>
     </div>
 }
 
-<div id="blazor-error-ui">
+<div id="blazor-error-ui" data-shell-error="@shellWireError">
     An unhandled error has occurred.
     <a href="" class="reload">Reload</a>
     <a class="dismiss">🗙</a>
@@ -41,7 +64,10 @@ else
 
 @code {
     private bool authInitialized;
+    private bool shellWired;
+    private string? shellWireError;
     private bool onLoginPage;
+    private bool _guardChecked;
 
     /// <summary>Pages that render without a session.</summary>
     private static readonly string[] publicRoutes = { "login", "register" };
@@ -57,12 +83,28 @@ else
             await AuthService.InitializeAsync();
             StateHasChanged();
         }
+
+        // Wire the shell chrome (drawer toggle, scrim, breadcrumb). The script is a
+        // module imported through interop because a plain <script src> after
+        // <Routes /> is not reliably executed under the prerender pipeline.
+        if (firstRender && !shellWired)
+        {
+            shellWired = true;
+            try
+            {
+                _ = await JS.InvokeAsync<IJSObjectReference>("import", "./aspireShell.js");
+            }
+            catch (Exception ex)
+            {
+                shellWired = false;
+                shellWireError = ex.GetType().Name + ": " + ex.Message;
+            }
+        }
     }
 
     protected override async Task OnParametersSetAsync()
     {
         onLoginPage = IsPublicRoute();
-
         // enforce the session as early as JS interop allows, so a protected page does not
         // flash its (empty) content before the redirect to /login lands
         if (!_guardChecked)
@@ -72,8 +114,6 @@ else
             GuardSession();
         }
     }
-
-    private bool _guardChecked;
 
     private bool IsPublicRoute()
     {
@@ -99,7 +139,6 @@ else
         var target = string.IsNullOrEmpty(returnUrl)
             ? "/login"
             : $"/login?returnUrl={Uri.EscapeDataString("/" + returnUrl)}";
-
         Nav.NavigateTo(target, forceLoad: true);
     }
 }

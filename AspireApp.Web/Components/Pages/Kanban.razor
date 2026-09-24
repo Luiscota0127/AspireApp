@@ -1,123 +1,261 @@
 @using AspireApp.Web.Services
+@using Microsoft.JSInterop
 @implements IAsyncDisposable
 @inject ApiAuthService Api
 @inject CollaborationService Collab
-<h3>Kanban</h3>
+@inject IJSRuntime JS
 
-@if (loadError != null)
-{
-    <div class="alert alert-warning d-flex align-items-center gap-2" role="alert">
-        <span>@loadError</span>
-        <button class="btn btn-sm btn-outline-secondary ms-auto" @onclick="RetryAsync">Reintentar</button>
+@* Kanban board.
+   Visual model follows Jira/Trello: a board header with the project name and a
+   member avatar stack, then one lane per status. Each lane has a coloured status
+   dot, a count chip and its own "create" affordance, and cards carry a key, the
+   title, a description preview, a due-date pill and a footer with the assignee
+   avatar plus move/delete actions. *@
+
+<div class="board">
+    <div class="board__header">
+        <div class="board__heading">
+            <span class="board__eyebrow">Board</span>
+            <h1 class="board__title">@(ProjectName ?? "Tablero")</h1>
+            <span class="board__total">@TotalCount @(TotalCount == 1 ? "tarea" : "tareas")</span>
+        </div>
+
+        <div class="board__members">
+            @if (members.Count > 0)
+            {
+                <span class="avatar-stack">
+                    @foreach (var m in members.Take(5))
+                    {
+                        <span class="avatar avatar--sm" title="@m.Email">@Initials(m.Email)</span>
+                    }
+                </span>
+            }
+            <button type="button" class="btn btn-primary btn-sm" @onclick="() => _composerStatus = (int)ApiAuthService.TaskStatus.Todo">
+                + Crear tarea
+            </button>
+        </div>
     </div>
-}
 
-<div class="kanban-toolbar">
-    <input class="form-control form-control-sm" placeholder="Nueva tarea..."
-           @bind="newTitle" @bind:event="oninput" @onkeydown="OnNewTitleKeyDown" />
-    <input class="form-control form-control-sm" placeholder="Asignar a (email o id)"
-           @bind="newAssigned" @bind:event="oninput" />
-    <button class="btn btn-primary btn-sm" @onclick="CreateTaskAsync" disabled="@creating">
-        @(creating ? "Añadiendo..." : "Añadir")
-    </button>
+    @if (loadError != null)
+    {
+        <div class="alert alert-warning d-flex align-items-center gap-2" role="alert">
+            <span>@loadError</span>
+            <button class="btn btn-sm btn-outline-secondary ms-auto" @onclick="RetryAsync">Reintentar</button>
+        </div>
+    }
+
+    @if (isLoading)
+    {
+        <div class="empty-state">
+            <p class="mb-0">Cargando tareas…</p>
+        </div>
+    }
+    else
+    {
+        <div class="board__lanes" data-board>
+            @foreach (var column in Columns)
+            {
+                var target = column.Status;
+                @* Drop handling is owned by boardDrag.js: Blazor cannot preventDefault()
+                   on dragover, which is what actually enables dropping. *@
+                <section class="lane lane--@column.Slug"
+                         data-lane-status="@target">
+
+                    <header class="lane__header">
+                        <span class="lane__dot" aria-hidden="true"></span>
+                        <span class="lane__name">@column.Title</span>
+                        <span class="lane__count">@column.Items.Count</span>
+                        <button type="button" class="lane__add" title="Añadir tarea en @column.Title"
+                                @onclick="() => _composerStatus = target">+</button>
+                    </header>
+
+                    <div class="lane__body">
+                        @if (column.Items.Count == 0 && _composerStatus != target)
+                        {
+                            <p class="lane__empty">Sin tareas todavía</p>
+                        }
+
+                        @foreach (var task in column.Items)
+                        {
+                            // card--dragging is applied and removed by boardDrag.js while the
+                            // pointer is down, so no render state is needed for it here.
+                            var overdue = task.DueDate.HasValue && task.DueDate.Value.Date < DateTime.Today
+                                && task.Status != (int)ApiAuthService.TaskStatus.Done;
+                            @* A Jira-style key: project initials plus a short slice of the id. *@
+                            var key = CardKey(task);
+
+                            <article class="card"
+                                     draggable="true"
+                                     data-task-id="@task.Id"
+                                     title="@task.Title"
+                                     @onclick="() => OpenTask(task)">
+                                <div class="card__top">
+                                    <span class="card__key">@key</span>
+                                    @if (task.Status == (int)ApiAuthService.TaskStatus.Done)
+                                    {
+                                        <span class="card__done" title="Completada" aria-label="Completada">✓</span>
+                                    }
+                                </div>
+
+                                <strong class="card__title">@task.Title</strong>
+
+                                @if (!string.IsNullOrWhiteSpace(task.Description))
+                                {
+                                    <p class="card__desc">@task.Description</p>
+                                }
+
+                                <footer class="card__footer">
+                                    <div class="card__meta">
+                                        @if (task.DueDate.HasValue)
+                                        {
+                                            <span class="due @(overdue ? "due--overdue" : "")"
+                                                  title="Fecha límite">
+                                                <span aria-hidden="true">🕘</span>@task.DueDate.Value.ToString("dd MMM")
+                                            </span>
+                                        }
+                                    </div>
+
+                                    <div class="card__people">
+                                        @if (!string.IsNullOrWhiteSpace(task.AssignedToId))
+                                        {
+                                            <span class="avatar avatar--xs" title="@AssigneeLabel(task)">@Initials(task.AssignedToId)</span>
+                                        }
+                                    </div>
+                                </footer>
+                            </article>
+                        }
+
+                        @if (_composerStatus == target)
+                        {
+                            <div class="composer">
+                                <textarea class="composer__input"
+                                          rows="2"
+                                          placeholder="¿Qué hay que hacer?"
+                                          @bind="newTitle"
+                                          @bind:event="oninput"
+                                          @onkeydown="OnComposerKeyDown"></textarea>
+                                <input class="composer__input composer__input--slim"
+                                       placeholder="Asignar a (email o id)"
+                                       @bind="newAssigned"
+                                       @bind:event="oninput" />
+                                <div class="composer__actions">
+                                    <button type="button" class="btn btn-primary btn-sm"
+                                            disabled="@(creating || string.IsNullOrWhiteSpace(newTitle))"
+                                            @onclick="CreateTaskAsync">
+                                        @(creating ? "Añadiendo…" : "Añadir tarjeta")
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm"
+                                            @onclick="CancelComposer">Cancelar</button>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </section>
+            }
+        </div>
+    }
 </div>
 
-@if (isLoading)
+@* Card detail. Keeps the board itself free of inline forms while preserving the
+   existing edit/delete behaviour. *@
+@if (_openTask is not null)
 {
-    <p class="text-muted">Cargando tareas...</p>
-}
-else
-{
-    <div class="kanban-board">
-        @foreach (var column in Columns)
+    var task = _openTask;
+    <div class="drawer-scrim" @onclick="CloseTask"></div>
+    <aside class="detail" role="dialog" aria-label="Detalle de la tarea">
+        <header class="detail__header">
+            <span class="card__key">@CardKey(task)</span>
+            <button type="button" class="detail__close" aria-label="Cerrar" @onclick="CloseTask">✕</button>
+        </header>
+
+        <h2 class="detail__title">@task.Title</h2>
+
+        @if (!string.IsNullOrWhiteSpace(task.Description))
         {
-            var target = column.Status;
-            var dropClass = _dragOverStatus == target ? "kanban-column kanban-column--active" : "kanban-column";
-            <div class="@dropClass"
-                 @ondragover="e => OnDragOver(e, target)"
-                 @ondragleave="e => OnDragLeave(e, target)"
-                 @ondrop="e => OnDropAsync(e, target)">
-                <div class="kanban-column__header">
-                    <span>@column.Title</span>
-                    <span class="badge bg-secondary">@column.Items.Count</span>
-                </div>
-
-                @if (column.Items.Count == 0)
-                {
-                    <p class="kanban-column__empty">Sin tareas</p>
-                }
-
-                @foreach (var task in column.Items)
-                {
-                    var dragging = _draggingId == task.Id;
-                    <div class="kanban-card @(dragging ? "kanban-card--dragging" : "")"
-                         draggable="true"
-                         @ondragstart="e => OnDragStart(e, task.Id)"
-                         @ondragend="OnDragEnd">
-                        <strong class="kanban-card__title">@task.Title</strong>
-                        @if (!string.IsNullOrWhiteSpace(task.Description))
-                        {
-                            <div class="kanban-card__desc">@task.Description</div>
-                        }
-                        <div class="kanban-card__footer">
-                            <button class="btn btn-sm btn-outline-secondary" title="Mover a la izquierda"
-                                    disabled="@(task.Status == (int)ApiAuthService.TaskStatus.Todo)"
-                                    @onclick="() => MoveAsync(task, -1)">&#8592;</button>
-                            <button class="btn btn-sm btn-outline-secondary" title="Mover a la derecha"
-                                    disabled="@(task.Status == (int)ApiAuthService.TaskStatus.Done)"
-                                    @onclick="() => MoveAsync(task, 1)">&#8594;</button>
-
-                            @if (_confirmDeleteId == task.Id)
-                            {
-                                <button class="btn btn-sm btn-danger ms-auto"
-                                        disabled="@(deletingId == task.Id)"
-                                        @onclick="() => DeleteTaskAsync(task)">
-                                    @(deletingId == task.Id ? "..." : "Confirmar")
-                                </button>
-                                <button class="btn btn-sm btn-outline-secondary"
-                                        disabled="@(deletingId == task.Id)"
-                                        @onclick="CancelDelete">Cancelar</button>
-                            }
-                            else
-                            {
-                                <button class="btn btn-sm btn-outline-danger ms-auto" title="Eliminar tarea"
-                                        @onclick="() => _confirmDeleteId = task.Id">&#10005;</button>
-                            }
-                        </div>
-                    </div>
-                }
-            </div>
+            <p class="detail__desc">@task.Description</p>
         }
-    </div>
+
+        <dl class="detail__meta">
+            <div>
+                <dt>Estado</dt>
+                <dd><span class="lane__dot lane__dot--@Slug(task.Status)" aria-hidden="true"></span>@StatusName(task.Status)</dd>
+            </div>
+            <div>
+                <dt>Responsable</dt>
+                <dd>@AssigneeLabel(task)</dd>
+            </div>
+            <div>
+                <dt>Fecha límite</dt>
+                <dd>@(task.DueDate?.ToString("dd MMM yyyy") ?? "Sin fecha")</dd>
+            </div>
+        </dl>
+
+        <div class="detail__actions">
+            <button type="button" class="btn btn-outline-secondary btn-sm"
+                    disabled="@(task.Status == (int)ApiAuthService.TaskStatus.Todo)"
+                    @onclick="() => MoveAndCloseAsync(task, -1)">← Mover atrás</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm"
+                    disabled="@(task.Status == (int)ApiAuthService.TaskStatus.Done)"
+                    @onclick="() => MoveAndCloseAsync(task, 1)">Avanzar →</button>
+        </div>
+
+        <div class="detail__danger">
+            @if (_confirmDeleteId == task.Id)
+            {
+                <button type="button" class="btn btn-danger btn-sm"
+                        disabled="@(deletingId == task.Id)"
+                        @onclick="() => DeleteTaskAsync(task)">
+                    @(deletingId == task.Id ? "Eliminando…" : "Sí, eliminar")
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm"
+                        disabled="@(deletingId == task.Id)"
+                        @onclick="CancelDelete">Cancelar</button>
+            }
+            else
+            {
+                <button type="button" class="btn btn-outline-danger btn-sm"
+                        @onclick="() => _confirmDeleteId = task.Id">Eliminar tarea</button>
+            }
+        </div>
+    </aside>
 }
 
 @code {
     [Parameter, EditorRequired]
     public Guid ProjectId { get; set; }
 
+    /// <summary>Optional board title; falls back to a generic label.</summary>
+    [Parameter]
+    public string? ProjectName { get; set; }
+
     private readonly Dictionary<int, List<ApiAuthService.TaskDto>> _byStatus = new();
+    private List<ApiAuthService.ProjectMemberDto> members = new();
     private bool isLoading;
     private bool creating;
     private string? loadError;
     private string? newTitle;
     private string? newAssigned;
-
+    private int? _composerStatus;
+    private ApiAuthService.TaskDto? _openTask;
     // two-step delete: the id awaiting confirmation, then the one actually being removed
     private Guid _confirmDeleteId = Guid.Empty;
     private Guid deletingId = Guid.Empty;
+    private Guid _subscribedProjectId;
+    private bool _handlersAttached;
+    private DotNetObjectReference<Kanban>? _selfRef;
+    private IJSObjectReference? _dragModule;
+    private bool _dragWired;
 
-    // drag & drop state
-    private Guid _draggingId;
-    private int? _dragOverStatus;
-
-    private sealed record Column(int Status, string Title, List<ApiAuthService.TaskDto> Items);
+    private sealed record Column(int Status, string Title, string Slug, List<ApiAuthService.TaskDto> Items);
 
     private IEnumerable<Column> Columns => new[]
     {
-        new Column((int)ApiAuthService.TaskStatus.Todo, "To Do", ItemsFor(ApiAuthService.TaskStatus.Todo)),
-        new Column((int)ApiAuthService.TaskStatus.InProgress, "In Progress", ItemsFor(ApiAuthService.TaskStatus.InProgress)),
-        new Column((int)ApiAuthService.TaskStatus.Done, "Done", ItemsFor(ApiAuthService.TaskStatus.Done)),
+        new Column((int)ApiAuthService.TaskStatus.Todo, "Por hacer", "todo", ItemsFor(ApiAuthService.TaskStatus.Todo)),
+        new Column((int)ApiAuthService.TaskStatus.InProgress, "En curso", "progress", ItemsFor(ApiAuthService.TaskStatus.InProgress)),
+        new Column((int)ApiAuthService.TaskStatus.Done, "Hecho", "done", ItemsFor(ApiAuthService.TaskStatus.Done)),
     };
+
+    private int TotalCount => _byStatus.Values.Sum(l => l.Count);
 
     private List<ApiAuthService.TaskDto> ItemsFor(ApiAuthService.TaskStatus status)
         => _byStatus.TryGetValue((int)status, out var list) ? list : new List<ApiAuthService.TaskDto>();
@@ -131,9 +269,10 @@ else
         }
 
         await UnsubscribeAsync();
-
         _subscribedProjectId = ProjectId;
         _byStatus.Clear();
+        _openTask = null;
+        _composerStatus = null;
 
         // handlers are attached per project so disposing the component leaves nothing behind
         Collab.OnTaskCreated += HandleTaskCreated;
@@ -144,10 +283,8 @@ else
         await Collab.StartAsync();
         await Collab.SubscribeProjectAsync(ProjectId);
         await LoadTasksAsync();
+        await LoadMembersAsync();
     }
-
-    private Guid _subscribedProjectId;
-    private bool _handlersAttached;
 
     private async Task LoadTasksAsync()
     {
@@ -167,11 +304,6 @@ else
             {
                 Upsert(task);
             }
-
-            if (tasks.Length == 0)
-            {
-                loadError = null;
-            }
         }
         finally
         {
@@ -179,7 +311,108 @@ else
         }
     }
 
+    /// <summary>
+    /// Member list powers the avatar stack and human-readable assignee labels.
+    /// A failure here is cosmetic, so it is deliberately swallowed.
+    /// </summary>
+    private async Task LoadMembersAsync()
+    {
+        try
+        {
+            var result = await Api.GetProjectMembersAsync(ProjectId);
+            members = result?.ToList() ?? new List<ApiAuthService.ProjectMemberDto>();
+        }
+        catch
+        {
+            members = new List<ApiAuthService.ProjectMemberDto>();
+        }
+    }
+
     private async Task RetryAsync() => await LoadTasksAsync();
+
+    // ---- presentation helpers ----------------------------------------------
+
+    /// <summary>Jira-style key, e.g. "WOR-3F2A": project initials plus a slice of the id.</summary>
+    private string CardKey(ApiAuthService.TaskDto task)
+    {
+        var source = string.IsNullOrWhiteSpace(ProjectName) ? "TASK" : ProjectName!;
+        var letters = new string(source.Where(char.IsLetterOrDigit).Take(3).ToArray()).ToUpperInvariant();
+        if (letters.Length == 0)
+        {
+            letters = "TASK";
+        }
+
+        var suffix = task.Id.ToString("N")[..4].ToUpperInvariant();
+        return $"{letters}-{suffix}";
+    }
+
+    private static string Initials(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "··";
+        }
+
+        var local = value.Split('@')[0];
+        var parts = local.Split(new[] { '.', '_', '-' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 2)
+        {
+            return $"{parts[0][0]}{parts[1][0]}".ToUpperInvariant();
+        }
+
+        return (local.Length >= 2 ? local[..2] : local[..1]).ToUpperInvariant();
+    }
+
+    /// <summary>Prefer the member's email over the raw user id in the UI.</summary>
+    private string AssigneeLabel(ApiAuthService.TaskDto task)
+    {
+        if (string.IsNullOrWhiteSpace(task.AssignedToId))
+        {
+            return "Sin asignar";
+        }
+
+        var match = members.FirstOrDefault(m =>
+            string.Equals(m.UserId, task.AssignedToId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(m.Id.ToString(), task.AssignedToId, StringComparison.OrdinalIgnoreCase));
+
+        return match?.Email ?? task.AssignedToId!;
+    }
+
+    private static string StatusName(int status) => status switch
+    {
+        (int)ApiAuthService.TaskStatus.Todo => "Por hacer",
+        (int)ApiAuthService.TaskStatus.InProgress => "En curso",
+        (int)ApiAuthService.TaskStatus.Done => "Hecho",
+        _ => "Desconocido",
+    };
+
+    private static string Slug(int status) => status switch
+    {
+        (int)ApiAuthService.TaskStatus.Todo => "todo",
+        (int)ApiAuthService.TaskStatus.InProgress => "progress",
+        (int)ApiAuthService.TaskStatus.Done => "done",
+        _ => "todo",
+    };
+
+    // ---- composer -----------------------------------------------------------
+    private void CancelComposer()
+    {
+        _composerStatus = null;
+        newTitle = null;
+        newAssigned = null;
+    }
+
+    private async Task OnComposerKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            await CreateTaskAsync();
+        }
+        else if (e.Key == "Escape")
+        {
+            CancelComposer();
+        }
+    }
 
     private async Task CreateTaskAsync()
     {
@@ -193,7 +426,6 @@ else
                 newTitle.Trim(),
                 null,
                 string.IsNullOrWhiteSpace(newAssigned) ? null : newAssigned.Trim());
-
             if (id == null)
             {
                 loadError = "No se pudo crear la tarea.";
@@ -202,7 +434,7 @@ else
 
             newTitle = null;
             newAssigned = null;
-            // SignalR usually pushes TaskCreated back to us; reload only as a fallback
+            // keep the composer open so several cards can be added in a row
             await LoadTasksAsync();
         }
         finally
@@ -211,13 +443,27 @@ else
         }
     }
 
-    private async Task OnNewTitleKeyDown(KeyboardEventArgs e)
+    // ---- card detail --------------------------------------------------------
+    private void OpenTask(ApiAuthService.TaskDto task)
     {
-        if (e.Key == "Enter") await CreateTaskAsync();
+        _confirmDeleteId = Guid.Empty;
+        _openTask = Find(task.Id) ?? task;
+    }
+
+    private void CloseTask()
+    {
+        _confirmDeleteId = Guid.Empty;
+        _openTask = null;
+    }
+
+    private async Task MoveAndCloseAsync(ApiAuthService.TaskDto task, int direction)
+    {
+        await MoveAsync(task, direction);
+        // re-read so the drawer shows the new status
+        _openTask = Find(task.Id) ?? _openTask;
     }
 
     // ---- real-time handlers -------------------------------------------------
-
     private Task HandleTaskCreated(ApiAuthService.TaskDto dto)
     {
         if (dto == null || dto.ProjectId != ProjectId) return Task.CompletedTask;
@@ -235,6 +481,7 @@ else
         {
             Remove(dto.Id);
             Upsert(dto);
+            if (_openTask?.Id == dto.Id) _openTask = dto;
             StateHasChanged();
         });
     }
@@ -244,6 +491,7 @@ else
         return InvokeAsync(() =>
         {
             Remove(id);
+            if (_openTask?.Id == id) _openTask = null;
             StateHasChanged();
         });
     }
@@ -270,39 +518,54 @@ else
     }
 
     // ---- drag & drop --------------------------------------------------------
-
-    private void OnDragStart(DragEventArgs e, Guid taskId)
+    /// <summary>
+    /// Wires boardDrag.js once the board exists in the DOM. The module owns the
+    /// browser half of the interaction and calls back into OnCardDropped.
+    ///
+    /// This deliberately does not test firstRender: the first render happens while
+    /// the board is still loading and therefore has no [data-board] element, so the
+    /// wiring has to be retried on the render that actually emits the lanes.
+    /// </summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        _draggingId = taskId;
-        _dragOverStatus = null;
+        if (_dragWired || isLoading)
+        {
+            return;
+        }
+
+        try
+        {
+            _selfRef ??= DotNetObjectReference.Create(this);
+            _dragModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./boardDrag.js");
+            await _dragModule.InvokeVoidAsync("attach", "board", _selfRef);
+            _dragWired = true;
+        }
+        catch (Exception ex) when (ex is JSException or InvalidOperationException or TaskCanceledException)
+        {
+            // The board still works through the detail drawer's move buttons.
+            _dragWired = false;
+        }
     }
 
-    private void OnDragEnd()
+    /// <summary>
+    /// Called from boardDrag.js when a card is dropped on a lane. Returns the
+    /// outcome so the caller can report a rejected move.
+    /// </summary>
+    [JSInvokable]
+    public async Task<bool> OnCardDropped(string taskId, int status)
     {
-        _draggingId = Guid.Empty;
-        _dragOverStatus = null;
-    }
+        if (!Guid.TryParse(taskId, out var id))
+        {
+            return false;
+        }
 
-    private void OnDragOver(DragEventArgs e, int status)
-    {
-        // required so the browser fires ondrop at all
-        e.DataTransfer.DropEffect = "move";
-        _dragOverStatus = status;
-    }
+        var moved = await MoveToStatusAsync(id, status);
+        if (moved)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
 
-    private void OnDragLeave(DragEventArgs e, int status)
-    {
-        if (_dragOverStatus == status) _dragOverStatus = null;
-    }
-
-    private Task OnDropAsync(DragEventArgs e, int status)
-    {
-        _dragOverStatus = null;
-        if (_draggingId == Guid.Empty) return Task.CompletedTask;
-
-        var id = _draggingId;
-        _draggingId = Guid.Empty;
-        return MoveToStatusAsync(id, status);
+        return moved;
     }
 
     private async Task MoveAsync(ApiAuthService.TaskDto task, int direction)
@@ -312,10 +575,14 @@ else
         await MoveToStatusAsync(task.Id, next);
     }
 
-    private async Task MoveToStatusAsync(Guid taskId, int targetStatus)
+    /// <summary>
+    /// Moves a card, optimistically updating the UI and rolling back if the API
+    /// refuses. Returns whether the move stuck.
+    /// </summary>
+    private async Task<bool> MoveToStatusAsync(Guid taskId, int targetStatus)
     {
         var current = Find(taskId);
-        if (current == null || current.Status == targetStatus) return;
+        if (current == null || current.Status == targetStatus) return false;
 
         _byStatus.TryGetValue(current.Status, out var source);
         var snapshot = source?.ToList() ?? new List<ApiAuthService.TaskDto>();
@@ -323,22 +590,23 @@ else
         // optimistic move, rolled back below if the API refuses
         Remove(taskId);
         Upsert(current with { Status = targetStatus });
+        _openTask = _openTask?.Id == taskId ? current with { Status = targetStatus } : _openTask;
         StateHasChanged();
 
         var ok = await Api.UpdateTaskStatusAsync(taskId, (ApiAuthService.TaskStatus)targetStatus);
-        if (ok) return;
+        if (ok) return true;
 
         Remove(taskId);
         foreach (var t in snapshot) Upsert(t);
         loadError = "No se pudo mover la tarea. Puede que no tengas permiso sobre ella.";
         StateHasChanged();
+        return false;
     }
 
     private ApiAuthService.TaskDto? Find(Guid id)
         => _byStatus.Values.SelectMany(l => l).FirstOrDefault(t => t.Id == id);
 
     // ---- delete -------------------------------------------------------------
-
     private void CancelDelete()
     {
         _confirmDeleteId = Guid.Empty;
@@ -360,6 +628,7 @@ else
 
             // the API also broadcasts TaskDeleted; removing here keeps the UI immediate
             Remove(task.Id);
+            _openTask = null;
         }
         finally
         {
@@ -369,7 +638,6 @@ else
     }
 
     // ---- teardown -----------------------------------------------------------
-
     private async Task UnsubscribeAsync()
     {
         if (_handlersAttached)
@@ -389,6 +657,31 @@ else
 
     public async ValueTask DisposeAsync()
     {
+        try
+        {
+            if (_dragModule is not null)
+            {
+                try
+                {
+                    await _dragModule.InvokeVoidAsync("stop", "board");
+                }
+                catch (JSException)
+                {
+                    // the circuit may already be gone during navigation
+                }
+
+                await _dragModule.DisposeAsync();
+                _dragModule = null;
+            }
+        }
+        catch
+        {
+            // navigation away must never throw
+        }
+
+        _selfRef?.Dispose();
+        _selfRef = null;
+
         try
         {
             await UnsubscribeAsync();

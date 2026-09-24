@@ -1,94 +1,526 @@
-/* Kanban board styles. Scoped to Kanban.razor by the Blazor CSS isolation pipeline. */
+/* ==========================================================================
+   Kanban board — Jira / Trello visual model
+   --------------------------------------------------------------------------
+   A board header with the title and a member avatar stack, then one lane per
+   status. Lanes are tinted columns with a coloured status dot, a count chip and
+   a hover "+" that opens an inline composer. Cards are white surfaces with a
+   key, a title, a description preview and a footer carrying the due date and the
+   assignee avatar.
+   ========================================================================== */
 
-.kanban-toolbar {
+/* ---------------------------------------------------------------- board --- */
+.board {
     display: flex;
-    gap: 0.5rem;
-    align-items: center;
-    margin-bottom: 1rem;
+    flex-direction: column;
+    min-height: 0;
 }
 
-.kanban-toolbar input:first-of-type {
-    flex: 1 1 auto;
-}
-
-.kanban-toolbar input {
-    max-width: 22rem;
-}
-
-.kanban-board {
+.board__header {
     display: flex;
-    gap: 1rem;
-    align-items: flex-start;
-    overflow-x: auto;
-    padding-bottom: 0.5rem;
-}
-
-.kanban-column {
-    flex: 1 1 0;
-    min-width: 16rem;
-    min-height: 16rem;
-    padding: 0.75rem;
-    background: #f6f7f9;
-    border: 1px solid #e3e5e8;
-    border-radius: 0.5rem;
-    transition: background-color 0.15s ease, border-color 0.15s ease;
-}
-
-.kanban-column--active {
-    background: #e7f1ff;
-    border-color: #8ab6f0;
-}
-
-.kanban-column__header {
-    display: flex;
-    align-items: center;
+    align-items: flex-end;
     justify-content: space-between;
-    font-weight: 600;
-    margin-bottom: 0.75rem;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.25rem;
 }
 
-.kanban-column__empty {
-    color: #8a8f98;
-    font-size: 0.875rem;
-    font-style: italic;
+.board__heading {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.board__eyebrow {
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-400);
+}
+
+.board__title {
+    font-size: 1.375rem;
+    font-weight: 650;
+    letter-spacing: -0.025em;
+    color: var(--ink-900);
     margin: 0;
 }
 
-.kanban-card {
-    padding: 0.625rem 0.75rem;
-    margin-bottom: 0.5rem;
-    background: #fff;
-    border: 1px solid #dfe1e5;
-    border-radius: 0.375rem;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-    cursor: grab;
+.board__total {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--ink-500);
+    background: var(--ink-100);
+    border: 1px solid var(--ink-200);
+    border-radius: var(--radius-pill);
+    padding: 0.15rem 0.55rem;
 }
 
-.kanban-card--dragging {
-    opacity: 0.45;
+.board__members {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+/* --------------------------------------------------------------- lanes ---- */
+.board__lanes {
+    display: flex;
+    gap: 0.875rem;
+    align-items: flex-start;
+    overflow-x: auto;
+    padding-bottom: 0.75rem;
+    /* Let horizontal drag scrolling feel native on touch devices */
+    -webkit-overflow-scrolling: touch;
+}
+
+.lane {
+    flex: 1 1 0;
+    min-width: 18rem;
+    max-width: 22rem;
+    display: flex;
+    flex-direction: column;
+    border-radius: var(--radius);
+    /* Trello uses a very light grey column on white; here it reads as a sunken panel */
+    background: var(--ink-100);
+    border: 1px solid var(--ink-200);
+    transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Drop target: the whole lane lights up while a card hovers over it */
+.lane--drop {
+    background: var(--brand-50);
+    border-color: var(--brand-400);
+    box-shadow: inset 0 0 0 1px var(--brand-300);
+}
+
+.lane__header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.7rem 0.75rem 0.6rem;
+}
+
+.lane__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: var(--radius-pill);
+    flex-shrink: 0;
+    background: var(--ink-400);
+}
+
+/* Status colours: grey for backlog, blue for in-flight, green for done —
+   the same convention Jira uses so the board reads without a legend. */
+.lane--todo .lane__dot,
+.lane__dot--todo { background: var(--ink-400); }
+.lane--progress .lane__dot,
+.lane__dot--progress { background: var(--accent-500); }
+.lane--done .lane__dot,
+.lane__dot--done { background: var(--ok-500); }
+
+.lane__name {
+    flex: 1;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink-600);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.lane__count {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: var(--ink-500);
+    background: var(--surface);
+    border: 1px solid var(--ink-200);
+    border-radius: var(--radius-pill);
+    padding: 0.1rem 0.45rem;
+    min-width: 1.4rem;
+    text-align: center;
+}
+
+.lane__add {
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--ink-500);
+    border-radius: var(--radius-xs);
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.lane__add:hover {
+    background: var(--surface);
+    border-color: var(--ink-200);
+    color: var(--brand-600);
+}
+
+.lane__body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0 0.6rem 0.6rem;
+    overflow-y: auto;
+    max-height: calc(100vh - 21rem);
+}
+
+.lane__empty {
+    margin: 0;
+    padding: 1.1rem 0.5rem;
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--ink-400);
+    border: 1px dashed var(--ink-200);
+    border-radius: var(--radius-sm);
+}
+
+/* --------------------------------------------------------------- cards ---- */
+.card {
+    position: relative;
+    padding: 0.7rem 0.75rem;
+    background: var(--surface);
+    border: 1px solid var(--ink-200);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-xs);
+    cursor: pointer;
+    transition: box-shadow 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
+}
+
+.card:hover {
+    border-color: var(--ink-300);
+    box-shadow: var(--shadow-sm);
+}
+
+.card:active {
+    transform: translateY(1px);
+}
+
+/* The dragged original stays in place, dimmed, so the lane still reads correctly */
+.card--dragging {
+    opacity: 0.4;
     cursor: grabbing;
+    transform: none;
+    box-shadow: none;
 }
 
-.kanban-card__title {
+.card__top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.3rem;
+}
+
+.card__key {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--ink-400);
+    font-variant-numeric: tabular-nums;
+}
+
+.card__done {
+    display: grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    border-radius: var(--radius-pill);
+    background: var(--ok-500);
+    color: #fff;
+    font-size: 0.625rem;
+    font-weight: 700;
+}
+
+.card__title {
     display: block;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--ink-900);
+    /* two-line clamp keeps cards a predictable height, like Trello */
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.card__desc {
+    margin: 0.3rem 0 0;
+    font-size: 0.75rem;
+    line-height: 1.45;
+    color: var(--ink-500);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.card__footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-top: 0.6rem;
+    min-height: 20px;
+}
+
+.card__meta {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.card__people {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex-shrink: 0;
+}
+
+/* Due-date pill; turns red once the date has passed on a non-done card */
+.due {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--ink-600);
+    background: var(--ink-100);
+    border: 1px solid var(--ink-200);
+    border-radius: var(--radius-xs);
+    padding: 0.1rem 0.4rem;
+    white-space: nowrap;
+}
+
+.due--overdue {
+    color: var(--danger-600);
+    background: color-mix(in srgb, var(--danger-500) 12%, transparent);
+    border-color: color-mix(in srgb, var(--danger-500) 35%, transparent);
+}
+
+/* ------------------------------------------------------------- avatars ---- */
+.avatar {
+    display: grid;
+    place-items: center;
+    border-radius: var(--radius-pill);
+    background: linear-gradient(135deg, var(--brand-400), var(--brand-700));
+    color: #fff;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: -0.02em;
+    flex-shrink: 0;
+    user-select: none;
+}
+
+.avatar--xs {
+    width: 22px;
+    height: 22px;
+    font-size: 0.5625rem;
+}
+
+.avatar--sm {
+    width: 28px;
+    height: 28px;
+    font-size: 0.625rem;
+}
+
+/* Overlapping avatar stack for the project members in the board header */
+.avatar-stack {
+    display: flex;
+    align-items: center;
+}
+
+.avatar-stack .avatar {
+    border: 2px solid var(--canvas);
+    margin-left: -8px;
+}
+
+.avatar-stack .avatar:first-child {
+    margin-left: 0;
+}
+
+/* ------------------------------------------------------------ composer ---- */
+.composer {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.6rem;
+    background: var(--surface);
+    border: 1px solid var(--brand-400);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-sm);
+}
+
+.composer__input {
+    width: 100%;
+    resize: vertical;
+    font-family: inherit;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    color: var(--ink-900);
+    background: transparent;
+    border: none;
+    padding: 0.15rem 0.2rem;
+    outline: none;
+}
+
+.composer__input--slim {
+    border-top: 1px solid var(--ink-150);
+    padding-top: 0.5rem;
+    font-size: 0.75rem;
+}
+
+.composer__input::placeholder {
+    color: var(--ink-400);
+}
+
+.composer__actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding-top: 0.15rem;
+}
+
+/* -------------------------------------------------------------- detail ---- */
+.drawer-scrim {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(2px);
+    z-index: 70;
+}
+
+.detail {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(26rem, 92vw);
+    z-index: 80;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    padding: 1.25rem 1.35rem 1.75rem;
+    background: var(--surface);
+    border-left: 1px solid var(--ink-200);
+    box-shadow: var(--shadow-lg);
+    overflow-y: auto;
+}
+
+.detail__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.detail__close {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--ink-200);
+    background: var(--surface);
+    color: var(--ink-500);
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    cursor: pointer;
+}
+
+.detail__close:hover {
+    background: var(--ink-100);
+    color: var(--ink-900);
+}
+
+.detail__title {
+    font-size: 1.125rem;
+    font-weight: 650;
+    line-height: 1.35;
+    letter-spacing: -0.02em;
+    color: var(--ink-900);
+    margin: 0;
     word-break: break-word;
 }
 
-.kanban-card__desc {
-    color: #5c636a;
+.detail__desc {
+    margin: 0;
     font-size: 0.8125rem;
-    margin-top: 0.25rem;
+    line-height: 1.6;
+    color: var(--ink-600);
     white-space: pre-wrap;
 }
 
-.kanban-card__footer {
+.detail__meta {
     display: flex;
-    gap: 0.25rem;
-    justify-content: flex-start;
-    align-items: center;
-    margin-top: 0.5rem;
+    flex-direction: column;
+    gap: 0.65rem;
+    margin: 0;
+    padding: 0.9rem 1rem;
+    background: var(--ink-50);
+    border: 1px solid var(--ink-200);
+    border-radius: var(--radius);
 }
 
-.kanban-card__footer .ms-auto {
-    margin-left: auto;
+.detail__meta > div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.detail__meta dt {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink-400);
+}
+
+.detail__meta dd {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0;
+    font-size: 0.8125rem;
+    font-weight: 550;
+    color: var(--ink-900);
+    text-align: right;
+    word-break: break-word;
+}
+
+.detail__actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.detail__danger {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: auto;
+    padding-top: 1rem;
+    border-top: 1px solid var(--ink-200);
+}
+
+/* ------------------------------------------------------------ responsive -- */
+@media (max-width: 991.98px) {
+    .lane {
+        /* on phones lanes keep a readable width and the board scrolls sideways */
+        min-width: 16.5rem;
+        max-width: 18rem;
+    }
+
+    .lane__body {
+        max-height: none;
+    }
 }

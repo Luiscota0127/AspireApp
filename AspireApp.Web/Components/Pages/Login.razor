@@ -3,9 +3,11 @@
 @inject AspireApp.Web.Services.ApiAuthService AuthService
 @inject NavigationManager Nav
 
+<PageTitle>Iniciar sesión</PageTitle>
+
 <div class="login-container">
     <div class="login-brand">
-        <span class="login-brand__mark">AA</span>
+        <span class="login-brand__mark" aria-hidden="true">A</span>
         <div>
             <h3>Iniciar sesión</h3>
             <p class="text-muted mb-0" style="font-size:0.8125rem;">Accede a tus proyectos y tableros</p>
@@ -21,37 +23,37 @@
 
     <EditForm Model="model" @formname="Login" OnValidSubmit="HandleLogin">
         <DataAnnotationsValidator />
-        <ValidationSummary class="text-danger" />
+        <ValidationSummary class="validation-errors" />
 
         <div class="form-group mb-3">
             <label for="email">Email</label>
-            <InputText id="email" 
-                       type="email" 
-                       class="form-control" 
-                       @bind-Value="model.Email" 
-                       placeholder="Enter your email" />
-            <ValidationMessage For="() => model.Email" class="text-danger" />
+            <InputText id="email"
+                       type="email"
+                       class="form-control"
+                       @bind-Value="model.Email"
+                       placeholder="tu@empresa.com" />
+            <ValidationMessage For="() => model.Email" class="validation-message" />
         </div>
 
         <div class="form-group mb-3">
-            <label for="password">Password</label>
-            <InputText id="password" 
-                       type="password" 
-                       class="form-control" 
-                       @bind-Value="model.Password" 
-                       placeholder="Enter your password" />
-            <ValidationMessage For="() => model.Password" class="text-danger" />
+            <label for="password">Contraseña</label>
+            <InputText id="password"
+                       type="password"
+                       class="form-control"
+                       @bind-Value="model.Password"
+                       placeholder="••" />
+            <ValidationMessage For="() => model.Password" class="validation-message" />
         </div>
 
         <button type="submit" class="btn btn-primary" disabled="@isSubmitting">
             @if (isSubmitting)
             {
-                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                <span> Logging in...</span>
+                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                <span>Entrando…</span>
             }
             else
             {
-                <span>Login</span>
+                <span>Entrar</span>
             }
         </button>
     </EditForm>
@@ -72,7 +74,6 @@
     {
         isSubmitting = true;
         errorMessage = null;
-
         try
         {
             var ok = await AuthService.LoginAsync(model.Email, model.Password);
@@ -89,13 +90,12 @@
             }
             else
             {
-                errorMessage = "Invalid email or password. Please try again.";
+                errorMessage = "Email o contraseña incorrectos. Inténtalo de nuevo.";
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            // Log ex as needed
-            errorMessage = "An unexpected error occurred during login.";
+            errorMessage = "Ha ocurrido un error inesperado al iniciar sesión.";
         }
         finally
         {
@@ -105,13 +105,12 @@
 
     public class LoginModel
     {
-        [Required(ErrorMessage = "Email is required.")]
-        [EmailAddress(ErrorMessage = "Invalid email format.")]
+        [Required(ErrorMessage = "El email es obligatorio.")]
+        [EmailAddress(ErrorMessage = "El formato del email no es válido.")]
         public string Email { get; set; } = string.Empty;
 
-        [Required(ErrorMessage = "Password is required.")]
-
-        [MinLength(6, ErrorMessage = "Password must be at least 6 characters long.")]
+        [Required(ErrorMessage = "La contraseña es obligatoria.")]
+        [MinLength(6, ErrorMessage = "La contraseña debe tener al menos 6 caracteres.")]
         public string Password { get; set; } = string.Empty;
     }
 }

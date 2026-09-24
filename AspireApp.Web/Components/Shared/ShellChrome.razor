@@ -1,0 +1,50 @@
+@* ShellChrome — wires the layout chrome after it exists in the DOM.
+   Rendered as a child of MainLayout rather than done inside the layout's own
+   OnAfterRenderAsync, because the layout also rehydrates the auth token in that
+   same pass and the two interop calls race there.
+
+   Kept invisible: it renders nothing, only drives aspireShell.js. *@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+@code {
+    private IJSObjectReference? module;
+    private bool wired;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || wired)
+        {
+            return;
+        }
+
+        try
+        {
+            module = await JS.InvokeAsync<IJSObjectReference>("import", "./aspireShell.js");
+            await module.InvokeVoidAsync("start");
+            wired = true;
+        }
+        catch (Exception ex) when (ex is JSException or InvalidOperationException or TaskCanceledException)
+        {
+            // The drawer is the only thing lost; the rest of the layout renders regardless.
+            wired = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (module is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await module.DisposeAsync();
+        }
+        catch
+        {
+            // A disposed circuit must not throw on teardown.
+        }
+    }
+}
